@@ -1,20 +1,16 @@
-# Customer 360 — git-source Databricks App (T8-min).
+# Customer 360 — Databricks App.
 #
-# Git-source app: Databricks pulls the app code from the GitHub repo/branch on each
-# `bundle run`, pulling as the app's service principal (needs an SP git credential —
-# see t1_t8min_plan.md §7.2). Do NOT also set an app-level source_code_path — DABs
-# rejects "both git_source and source_code_path set".
+# DEV/TEST (now → T7): source_code_path deployment. `bundle deploy` uploads the
+# local app/ folder to the workspace and the app runs from there — no GitHub pull,
+# no Repos Git Proxy, no PAT needed. Deploys to the real Apps runtime so OBO auth
+# (T2+) is testable.
 #
-# Resource bindings (sql_warehouse, database, genie_space, forward-ETL job) and
-# user_api_scopes: [sql, dashboards.genie] are added in T6/T8-full.
+# T8 (production pattern): switch to a git-source app — replace source_code_path
+# with git_repository (provider/url) + git_source (branch/source_code_path) and
+# register the app SP's git credential. That's the ONLY time the Git Proxy is needed.
 resources:
   apps:
     customer360:
       name: customer360
       description: "Customer 360 — Databricks Apps + Lakebase capstone"
-      git_repository:
-        provider: gitHub
-        url: ${var.git_repo_url}
-      git_source:
-        branch: ${var.git_branch}
-        source_code_path: app
+      source_code_path: ../app
