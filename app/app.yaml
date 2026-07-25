@@ -1,6 +1,11 @@
-# Databricks App runtime config.
-# T8-min: minimal — just the start command. Env vars + user_authorization
-# (OBO scopes) are added in T6 once features exist.
+# Databricks App runtime config (app.yaml controls how the process starts + env only).
+#
+# OBO / user-authorization SCOPES are NOT set here — they live in the DABs app resource
+# (resources/app.yml → user_api_scopes). app.yaml is runtime-only.
+#
+# The runtime injects DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET for
+# the app service principal — we don't set those. Values below are non-secret ids/hosts;
+# secret-backed valueFrom entries are a T6 concern.
 command:
   - "uvicorn"
   - "backend.main:app"
@@ -8,3 +13,19 @@ command:
   - "0.0.0.0"
   - "--port"
   - "8000"
+
+env:
+  # Lakebase (Postgres) — SP connects here as DATABRICKS_CLIENT_ID (the granted PG role)
+  - name: "PGHOST"
+    value: "ep-plain-art-e1jje7ek.database.eastus2.azuredatabricks.net"
+  - name: "PGDATABASE"
+    value: "cust360ai27"
+  - name: "PG_INSTANCE_NAME"
+    value: "ai27-lb-apps-capstone"
+  # Data-service ids surfaced via /api/config (used by the frontend from T3+)
+  - name: "WAREHOUSE_ID"
+    value: "148ccb90800933a1"
+  - name: "DASHBOARD_ID"
+    value: "01f187f4c665171295386e8e783eb17d"
+  - name: "GENIE_SPACE_ID"
+    value: "01f187f4edaa146f889fecdc69cc2544"

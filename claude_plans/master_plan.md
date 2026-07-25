@@ -175,7 +175,7 @@ the start.
 
 | Order | Task | Why here | Deploy checkpoint |
 |---|---|---|---|
-| 1 | **T1 + T8-min** (combined plan: `t1_t8min_plan.md`) — synced+staging tables, then minimal git-source deploy to create the app SP, then SP grants | Foundation; app is useless without it. Combined because SP grants (T1-b) need the SP that only exists after first deploy (T8-min). | Tables via psql/UI → `bundle deploy`+`run` (hello app) → grants applied |
+| 1 | **T1** (plan: `t1_plan.md`) — synced+staging tables, then SP grants (using the app SP created by the first `source_code_path` deploy) | Foundation; app is useless without it. SP grants (T1-b) need the SP that only exists after the first deploy. T8 git-source packaging is deferred. | Tables via psql/UI → minimal deploy (app SP) → grants applied |
 | 3 | **T2** Auth (OBO + SP + `lakebase_sp()`) | Every route needs identity. Validate OBO preview toggle + consent. | Deploy; test endpoints return correct identities |
 | 4 | **T3 read path** `/api/customers` + `/customers/{id}` + Customers/Detail pages | First real vertical slice: SP Lakebase reads → React list/detail. | Deploy; list paginates, detail renders |
 | 5 | **T3 metrics** `/customers/{id}/metrics` (warehouse + OBO) | Adds the OBO warehouse path. | Deploy; metrics tab loads |

@@ -14,3 +14,10 @@ resources:
       name: customer360
       description: "Customer 360 — Databricks Apps + Lakebase capstone"
       source_code_path: ../app
+      # OBO (on-behalf-of user) scopes — T2. The Apps proxy only forwards a user token
+      # carrying these scopes. Exactly what we need: `sql` (warehouse, T3) + `dashboards.genie`
+      # (Genie API, T5). Platform auto-adds iam.current-user:read / iam.access-control:read
+      # (which is why obo_client(...).current_user.me() works). Public Preview field.
+      user_api_scopes:
+        - sql
+        - dashboards.genie
