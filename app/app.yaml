@@ -1,0 +1,10 @@
+# Databricks App runtime config.
+# T8-min: minimal — just the start command. Env vars + user_authorization
+# (OBO scopes) are added in T6 once features exist.
+command:
+  - "uvicorn"
+  - "backend.main:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"

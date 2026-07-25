@@ -60,17 +60,22 @@ cur = conn.cursor()
 
 # COMMAND ----------
 
-# Confirm the SP role exists (created lazily on the SP's first Lakebase login).
+# The SP's PG role is created lazily on its first Lakebase login. Since the app may not
+# be serving yet, pre-create the role explicitly via the databricks_auth extension —
+# databricks_create_role(<client_id>, 'SERVICE_PRINCIPAL') registers a LOGIN role that
+# authenticates via Databricks OAuth. Idempotent: skip if it already exists.
 cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (SP_ROLE,))
 if cur.fetchone() is None:
-    print(f"⚠️  Role '{SP_ROLE}' does not exist yet.")
-    print("    The app SP must log into Lakebase once before it can be granted.")
-    print("    Fix: hit an app endpoint that touches Lakebase (or run a SELECT 1 as the SP),")
-    print("    then re-run this notebook.")
-    cur.close(); conn.close()
-    dbutils.notebook.exit("ROLE_MISSING")
+    print(f"Role '{SP_ROLE}' missing — creating via databricks_create_role().")
+    cur.execute("CREATE EXTENSION IF NOT EXISTS databricks_auth")
+    cur.execute("SELECT databricks_create_role(%s, 'SERVICE_PRINCIPAL')", (SP_ROLE,))
+    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (SP_ROLE,))
+    assert cur.fetchone() is not None, f"role {SP_ROLE} still missing after create"
+    print(f"  created role '{SP_ROLE}'.")
+else:
+    print(f"Role '{SP_ROLE}' already exists.")
 
-print(f"Role '{SP_ROLE}' exists — applying grants.")
+print(f"Applying grants to '{SP_ROLE}'.")
 
 # COMMAND ----------
 

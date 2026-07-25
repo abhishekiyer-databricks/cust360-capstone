@@ -1,0 +1,20 @@
+# Customer 360 — git-source Databricks App (T8-min).
+#
+# Git-source app: Databricks pulls the app code from the GitHub repo/branch on each
+# `bundle run`, pulling as the app's service principal (needs an SP git credential —
+# see t1_t8min_plan.md §7.2). Do NOT also set an app-level source_code_path — DABs
+# rejects "both git_source and source_code_path set".
+#
+# Resource bindings (sql_warehouse, database, genie_space, forward-ETL job) and
+# user_api_scopes: [sql, dashboards.genie] are added in T6/T8-full.
+resources:
+  apps:
+    customer360:
+      name: customer360
+      description: "Customer 360 — Databricks Apps + Lakebase capstone"
+      git_repository:
+        provider: gitHub
+        url: ${var.git_repo_url}
+      git_source:
+        branch: ${var.git_branch}
+        source_code_path: app

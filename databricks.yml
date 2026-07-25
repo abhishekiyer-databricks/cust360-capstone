@@ -1,0 +1,28 @@
+# DABs bundle root — Customer 360 capstone.
+# T8-min: minimal bundle with a git-source app. Variables + more resources
+# (forward-ETL job, declarative synced tables) grow through T6-T8.
+bundle:
+  name: customer360
+
+variables:
+  git_repo_url:
+    description: HTTPS URL of the git repo the app pulls source from
+    default: https://github.com/abhishekiyer-databricks/cust360-capstone
+  git_branch:
+    description: Branch the git-source app tracks
+    default: main
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-984752964297111.11.azuredatabricks.net
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-984752964297111.11.azuredatabricks.net
