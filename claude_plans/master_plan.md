@@ -119,13 +119,23 @@ These are the choices that touch multiple tasks. Locking them now avoids rework.
 - Token rotation: Lakebase OAuth tokens expire ~1h. **Mint a fresh token per checkout via
   a `connection_factory`** (option (a) in the task). Document this choice.
 
-### D5 — Deploy model (T8, but shapes everything from day 1)
-- **Git-source app** (not source-code-path upload — explicitly required).
+### D5 — Deploy model (TWO phases — corrected 2026-07-25)
+- **Dev/test loop (now → T7): `source_code_path` deployment.** `bundle deploy` uploads the
+  local `app/` folder; the app runs from there in the real Apps runtime (so OBO/T2+ is
+  testable). **No GitHub pull, no Repos Git Proxy, no PAT.** This is still a real DABs deploy.
+- **T8 (production pattern, required for submission): git-source app.** Switch
+  `resources/app.yml` from `source_code_path` to `git_repository` (provider/url) + `git_source`
+  (branch/source_code_path), register the app SP git credential (PAT). The Git Proxy cluster is
+  only needed here.
+  > Earlier mistake: front-loaded git-source into the first deploy → hit the terminated shared
+  > "Repos Git Proxy" cluster. Git-source is a T8-only concern; dev uses source_code_path.
 - `databricks.yml` with `targets: dev / prod`; iterate with `bundle deploy` + `bundle run`.
+- **Use the Homebrew CLI `/opt/homebrew/bin/databricks` (v1.5.0) for ALL bundle commands** —
+  the PATH `databricks` (v0.291.0) fails `bundle deploy` with an expired-Terraform-GPG-key error.
 - **Commit `app/frontend/dist/`** (built bundle) so the runtime command is just
   `uvicorn backend.main:app` — no build step on the App runtime.
 - **Do NOT keep `package.json` at `app/` root** (Apps runtime would run `npm build` and fail).
-  Scaffold ships one there → **move/remove it; keep `package.json` only in `app/frontend/`.**
+  Already removed; keep `package.json` only in `app/frontend/`.
   (See Scaffold Fixes below.)
 
 ### D6 — Dev/test loop (per user's decision)
