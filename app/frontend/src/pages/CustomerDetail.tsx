@@ -4,6 +4,7 @@ import {
   Card,
   Group,
   Loader,
+  Progress,
   SimpleGrid,
   Stack,
   Tabs,
@@ -14,7 +15,15 @@ import { useQuery } from "@tanstack/react-query";
 import { DataTable } from "mantine-datatable";
 import { Link, useParams } from "react-router-dom";
 
-import { CustomerProfile, Transaction, getCustomer } from "../api/client";
+import {
+  CustomerMetrics,
+  CustomerProfile,
+  Transaction,
+  getCustomer,
+  getCustomerMetrics,
+} from "../api/client";
+
+const fmtMoney = (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -57,6 +66,67 @@ function ProfileTab({ p }: { p: CustomerProfile }) {
         <Field label="Last purchase" value={p.last_purchase_date} />
       </SimpleGrid>
     </Card>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <Card withBorder radius="md" padding="md">
+      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+        {label}
+      </Text>
+      <Text size="xl" fw={700}>
+        {value}
+      </Text>
+    </Card>
+  );
+}
+
+function MetricsTab({ id }: { id: string }) {
+  // Independent query → this tab loads in parallel with the detail fetch (master_plan §7).
+  // Metrics are the expensive warehouse+OBO aggregate, so cache longer (60s).
+  const { data, isLoading, error } = useQuery<CustomerMetrics>({
+    queryKey: ["customer", id, "metrics"],
+    queryFn: () => getCustomerMetrics(id),
+    staleTime: 60 * 1000,
+  });
+
+  if (isLoading) return <Loader color="lava" />;
+  if (error) return <Text c="red">Failed to load metrics: {(error as Error).message}</Text>;
+  if (!data) return null;
+
+  const maxCat = Math.max(...data.top_categories.map((c) => c.amount), 1);
+
+  return (
+    <Stack>
+      <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }}>
+        <Stat label="Lifetime spend" value={fmtMoney(data.lifetime_spend)} />
+        <Stat label="Last 30 days" value={fmtMoney(data.spend_30d)} />
+        <Stat label="Last 90 days" value={fmtMoney(data.spend_90d)} />
+        <Stat label="Open tickets" value={data.open_tickets} />
+        <Stat label="Avg CSAT" value={data.avg_csat == null ? "—" : `${data.avg_csat} / 4`} />
+      </SimpleGrid>
+
+      <Card withBorder radius="md" padding="lg">
+        <Text fw={600} mb="sm">
+          Top categories by spend
+        </Text>
+        {data.top_categories.length === 0 && <Text c="dimmed">No completed purchases.</Text>}
+        <Stack gap="xs">
+          {data.top_categories.map((c) => (
+            <div key={c.category ?? "unknown"}>
+              <Group justify="space-between" mb={2}>
+                <Text size="sm">{c.category ?? "Uncategorized"}</Text>
+                <Text size="sm" c="dimmed">
+                  {fmtMoney(c.amount)}
+                </Text>
+              </Group>
+              <Progress value={(c.amount / maxCat) * 100} color="lava" size="sm" />
+            </div>
+          ))}
+        </Stack>
+      </Card>
+    </Stack>
   );
 }
 
@@ -130,9 +200,7 @@ export default function CustomerDetail() {
           <Tabs.List>
             <Tabs.Tab value="profile">Profile</Tabs.Tab>
             <Tabs.Tab value="activity">Activity</Tabs.Tab>
-            <Tabs.Tab value="metrics" disabled>
-              Metrics (T3B)
-            </Tabs.Tab>
+            <Tabs.Tab value="metrics">Metrics</Tabs.Tab>
             <Tabs.Tab value="notes" disabled>
               Notes (T3C)
             </Tabs.Tab>
@@ -146,6 +214,9 @@ export default function CustomerDetail() {
           </Tabs.Panel>
           <Tabs.Panel value="activity" pt="md">
             <ActivityTab txns={data.recent_transactions} />
+          </Tabs.Panel>
+          <Tabs.Panel value="metrics" pt="md">
+            <MetricsTab id={id} />
           </Tabs.Panel>
         </Tabs>
       )}

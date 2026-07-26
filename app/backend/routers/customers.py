@@ -17,11 +17,23 @@ from __future__ import annotations
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Query
+from cachetools import TTLCache
+from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg.rows import dict_row
 
+from ..auth import obo_client
 from ..db import lakebase_sp
-from ..models import Customer, CustomerDetail, CustomerProfile, Page, Transaction
+from ..models import (
+    CategorySpend,
+    Customer,
+    CustomerDetail,
+    CustomerMetrics,
+    CustomerProfile,
+    Page,
+    Segment,
+    Transaction,
+)
+from ..warehouse import run_query
 
 log = logging.getLogger(__name__)
 
@@ -126,3 +138,91 @@ def get_customer(customer_id: str) -> CustomerDetail:
         profile=CustomerProfile(**profile_row),
         recent_transactions=[Transaction(**r) for r in txn_rows],
     )
+
+
+# ---------------------------------------------------------------------------
+# Metrics — cross-table aggregate on gold via the SQL warehouse, as the USER (OBO).
+# This is the one read that does NOT use Lakebase: it joins transactions × products ×
+# support_tickets (support_tickets isn't synced), so the warehouse is the right engine and
+# OBO makes the warehouse audit reflect the calling user (master_plan §2 / §3-D2).
+# ---------------------------------------------------------------------------
+# Only completed sales count toward spend (pending/refunded excluded — verified against data).
+_METRICS_SQL = """
+WITH tx AS (
+  SELECT t.amount, t.transaction_date, p.category
+  FROM transactions t
+  LEFT JOIN products p ON t.product_id = p.product_id
+  WHERE t.customer_id = :customer_id AND t.status = 'completed'
+)
+SELECT
+  (SELECT coalesce(sum(amount), 0) FROM tx) AS lifetime_spend,
+  (SELECT coalesce(sum(amount), 0) FROM tx
+     WHERE transaction_date >= current_date - INTERVAL 30 DAYS) AS spend_30d,
+  (SELECT coalesce(sum(amount), 0) FROM tx
+     WHERE transaction_date >= current_date - INTERVAL 90 DAYS) AS spend_90d,
+  (SELECT count(*) FROM support_tickets
+     WHERE customer_id = :customer_id AND status IN ('open', 'in_progress')) AS open_tickets,
+  (SELECT round(avg(csat_score), 2) FROM support_tickets
+     WHERE customer_id = :customer_id) AS avg_csat
+"""
+
+_TOP_CATEGORIES_SQL = """
+SELECT p.category AS category, round(sum(t.amount), 2) AS amount
+FROM transactions t
+LEFT JOIN products p ON t.product_id = p.product_id
+WHERE t.customer_id = :customer_id AND t.status = 'completed'
+GROUP BY p.category
+ORDER BY amount DESC
+LIMIT 5
+"""
+
+
+@router.get("/customers/{customer_id}/metrics", response_model=CustomerMetrics)
+def get_customer_metrics(customer_id: str, request: Request) -> CustomerMetrics:
+    """Live cross-table metrics from gold via the SQL warehouse (OBO — the calling user)."""
+    ws = obo_client(request)  # 401 if no proxy token — never falls back to the SP
+    params = {"customer_id": customer_id}
+
+    agg_rows = run_query(ws, _METRICS_SQL, params, label="metrics")
+    agg = agg_rows[0] if agg_rows else {}
+    cat_rows = run_query(ws, _TOP_CATEGORIES_SQL, params, label="metrics_top_categories")
+
+    def num(v) -> float:
+        return float(v) if v is not None else 0.0
+
+    return CustomerMetrics(
+        lifetime_spend=num(agg.get("lifetime_spend")),
+        spend_30d=num(agg.get("spend_30d")),
+        spend_90d=num(agg.get("spend_90d")),
+        top_categories=[
+            CategorySpend(category=r.get("category"), amount=num(r.get("amount"))) for r in cat_rows
+        ],
+        open_tickets=int(agg.get("open_tickets") or 0),
+        avg_csat=float(agg["avg_csat"]) if agg.get("avg_csat") is not None else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Segments — the named segment list for the filter dropdown + Segment display.
+# Small, slow-changing reference data (8 rows): fetch once via the warehouse (OBO) and cache
+# server-side ~5m (master_plan §7 caching). Lives in gold (customer_segments), not synced.
+# ---------------------------------------------------------------------------
+_segments_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
+
+
+@router.get("/segments", response_model=list[Segment])
+def list_segments(request: Request) -> list[Segment]:
+    """The 8 named segments (id + name), TTL-cached ~5m."""
+    cached = _segments_cache.get("all")
+    if cached is not None:
+        return cached
+
+    ws = obo_client(request)
+    rows = run_query(
+        ws,
+        "SELECT segment_id, segment_name FROM customer_segments ORDER BY segment_id",
+        label="segments",
+    )
+    segments = [Segment(segment_id=r["segment_id"], segment_name=r.get("segment_name")) for r in rows]
+    _segments_cache["all"] = segments
+    return segments

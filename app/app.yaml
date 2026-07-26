@@ -29,3 +29,8 @@ env:
     value: "01f187f4c665171295386e8e783eb17d"
   - name: "GENIE_SPACE_ID"
     value: "01f187f4edaa146f889fecdc69cc2544"
+  # Gold Delta catalog/schema — SQL-warehouse (OBO) read path for metrics + segments (T3B)
+  - name: "CAPSTONE_CATALOG"
+    value: "ai_27"
+  - name: "CAPSTONE_SCHEMA"
+    value: "lakebase_apps_capstone_gold"

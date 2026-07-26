@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Badge, Group, NumberInput, Paper, Stack, TextInput, Title } from "@mantine/core";
+import { Badge, Group, NumberInput, Paper, Select, Stack, Title } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { DataTable } from "mantine-datatable";
 import { useNavigate } from "react-router-dom";
 
-import { Customer, listCustomers } from "../api/client";
+import { Customer, listCustomers, listSegments } from "../api/client";
 
 const PAGE_SIZE = 25;
 
@@ -23,9 +23,16 @@ export default function Customers() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
+  // Named segments for the dropdown (id + name). Slow-changing → cache 5m (master_plan §7).
+  const { data: segments } = useQuery({
+    queryKey: ["segments"],
+    queryFn: listSegments,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Filter inputs. Debounce ~250ms so typing doesn't fire a request per keystroke
   // (master_plan §7 React perf).
-  const [segment, setSegment] = useState("");
+  const [segment, setSegment] = useState<string | null>(null);
   const [minLtv, setMinLtv] = useState<number | "">("");
   const [maxChurn, setMaxChurn] = useState<number | "">("");
   const [debounced] = useDebouncedValue({ segment, minLtv, maxChurn }, 250);
@@ -51,15 +58,20 @@ export default function Customers() {
 
       <Paper withBorder radius="md" p="md">
         <Group align="end">
-          <TextInput
+          <Select
             label="Segment"
-            placeholder="e.g. S or S1"
+            placeholder="All segments"
+            clearable
             value={segment}
-            onChange={(e) => {
-              setSegment(e.currentTarget.value);
+            onChange={(v) => {
+              setSegment(v);
               setPage(1);
             }}
-            w={140}
+            data={(segments ?? []).map((s) => ({
+              value: s.segment_id,
+              label: s.segment_name ? `${s.segment_name} (${s.segment_id})` : s.segment_id,
+            }))}
+            w={220}
           />
           <NumberInput
             label="Min lifetime value"

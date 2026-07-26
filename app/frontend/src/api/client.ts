@@ -52,6 +52,25 @@ export interface Page<T> {
   page_size: number;
 }
 
+export interface CategorySpend {
+  category: string | null;
+  amount: number;
+}
+
+export interface CustomerMetrics {
+  lifetime_spend: number;
+  spend_30d: number;
+  spend_90d: number;
+  top_categories: CategorySpend[];
+  open_tickets: number;
+  avg_csat: number | null;
+}
+
+export interface Segment {
+  segment_id: string;
+  segment_name: string | null;
+}
+
 export interface WhoAmI {
   identity: string;
   user_name: string | null;
@@ -98,6 +117,14 @@ export function listCustomers(f: CustomerFilters): Promise<Page<Customer>> {
 
 export function getCustomer(id: string): Promise<CustomerDetail> {
   return apiGet<CustomerDetail>(`/customers/${encodeURIComponent(id)}`);
+}
+
+export function getCustomerMetrics(id: string): Promise<CustomerMetrics> {
+  return apiGet<CustomerMetrics>(`/customers/${encodeURIComponent(id)}/metrics`);
+}
+
+export function listSegments(): Promise<Segment[]> {
+  return apiGet<Segment[]>("/segments");
 }
 
 export function whoami(): Promise<WhoAmI> {

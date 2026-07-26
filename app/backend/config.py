@@ -42,3 +42,13 @@ PGPORT: int = int(_get("PGPORT", "5432") or "5432")
 WAREHOUSE_ID: str | None = _get("WAREHOUSE_ID")
 DASHBOARD_ID: str | None = _get("DASHBOARD_ID")
 GENIE_SPACE_ID: str | None = _get("GENIE_SPACE_ID")
+
+# Gold Delta catalog/schema — the SQL-warehouse (OBO) read path for metrics + segments (T3B).
+# The synced tables are the fast SP read path; these gold tables are queried via the warehouse.
+CAPSTONE_CATALOG: str | None = _get("CAPSTONE_CATALOG")
+CAPSTONE_SCHEMA: str | None = _get("CAPSTONE_SCHEMA")
+
+
+def gold(table: str) -> str:
+    """Fully-qualified gold table name, e.g. gold('customers') -> ai_27.<schema>.customers."""
+    return f"{CAPSTONE_CATALOG}.{CAPSTONE_SCHEMA}.{table}"

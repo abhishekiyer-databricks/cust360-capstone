@@ -82,3 +82,30 @@ class CustomerDetail(BaseModel):
 
     profile: CustomerProfile
     recent_transactions: list[Transaction]
+
+
+# ---------------------------------------------------------------------------
+# Metrics (T3B) — cross-table aggregate computed on gold via the SQL warehouse (OBO).
+# ---------------------------------------------------------------------------
+class CategorySpend(BaseModel):
+    category: str | None = None
+    amount: float
+
+
+class CustomerMetrics(BaseModel):
+    """Live aggregate across transactions × products × support_tickets (gold)."""
+
+    lifetime_spend: float
+    spend_30d: float
+    spend_90d: float
+    top_categories: list[CategorySpend]
+    open_tickets: int
+    avg_csat: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# Segments (T3B) — the 7-8 named segments for the filter dropdown + display.
+# ---------------------------------------------------------------------------
+class Segment(BaseModel):
+    segment_id: str
+    segment_name: str | None = None
