@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Pagination envelope (D1). Generic so we can reuse it for any list endpoint.
@@ -109,3 +109,30 @@ class CustomerMetrics(BaseModel):
 class Segment(BaseModel):
     segment_id: str
     segment_name: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Writes (T3C) — notes + segment overrides land in Lakebase staging (app SP), each paired
+# with an audit row in the same transaction. Actor email comes from X-Forwarded-Email.
+# ---------------------------------------------------------------------------
+class NoteCreate(BaseModel):
+    note_text: str = Field(min_length=1, max_length=5000)
+
+
+class Note(BaseModel):
+    note_id: str
+    customer_id: str
+    author_email: str
+    note_text: str
+    created_at: datetime
+
+
+class SegmentOverrideCreate(BaseModel):
+    override_segment: str = Field(min_length=1, max_length=10)
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class SegmentOverrideResult(BaseModel):
+    customer_id: str
+    override_segment: str
+    changed: bool  # False when re-submitting the same value (idempotent no-op)

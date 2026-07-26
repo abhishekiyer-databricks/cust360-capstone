@@ -1,26 +1,36 @@
+import { useState } from "react";
 import {
   Anchor,
   Badge,
+  Button,
   Card,
   Group,
   Loader,
   Progress,
+  Select,
   SimpleGrid,
   Stack,
-  Tabs,
   Text,
+  Textarea,
+  Tabs,
   Title,
 } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
+import { notifications } from "@mantine/notifications";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable } from "mantine-datatable";
 import { Link, useParams } from "react-router-dom";
 
 import {
   CustomerMetrics,
   CustomerProfile,
+  Note,
   Transaction,
+  addNote,
   getCustomer,
   getCustomerMetrics,
+  listNotes,
+  listSegments,
+  overrideSegment,
 } from "../api/client";
 
 const fmtMoney = (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -170,6 +180,146 @@ function ActivityTab({ txns }: { txns: Transaction[] }) {
   );
 }
 
+function NotesTab({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+
+  const { data: notes, isLoading } = useQuery<Note[]>({
+    queryKey: ["customer", id, "notes"],
+    queryFn: () => listNotes(id),
+    staleTime: 10 * 1000,
+  });
+
+  const mutation = useMutation({
+    mutationFn: () => addNote(id, text.trim()),
+    onSuccess: () => {
+      setText("");
+      // Refetch the notes list so the new note shows immediately (master_plan §7).
+      qc.invalidateQueries({ queryKey: ["customer", id, "notes"] });
+      notifications.show({ message: "Note added", color: "teal" });
+    },
+    onError: (e) => notifications.show({ message: (e as Error).message, color: "red" }),
+  });
+
+  return (
+    <Stack>
+      <Card withBorder radius="md" padding="md">
+        <Textarea
+          label="Add a note"
+          placeholder="Write a note about this customer…"
+          value={text}
+          onChange={(e) => setText(e.currentTarget.value)}
+          autosize
+          minRows={2}
+        />
+        <Group justify="flex-end" mt="sm">
+          <Button
+            color="lava"
+            onClick={() => mutation.mutate()}
+            loading={mutation.isPending}
+            disabled={!text.trim()}
+          >
+            Add note
+          </Button>
+        </Group>
+      </Card>
+
+      {isLoading ? (
+        <Loader color="lava" />
+      ) : (notes ?? []).length === 0 ? (
+        <Text c="dimmed">No notes yet.</Text>
+      ) : (
+        <Stack gap="sm">
+          {notes!.map((n) => (
+            <Card key={n.note_id} withBorder radius="md" padding="md">
+              <Group justify="space-between" mb={4}>
+                <Text size="sm" fw={600}>
+                  {n.author_email}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {new Date(n.created_at).toLocaleString()}
+                </Text>
+              </Group>
+              <Text style={{ whiteSpace: "pre-wrap" }}>{n.note_text}</Text>
+            </Card>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+function SegmentTab({ id, currentSegment }: { id: string; currentSegment: string | null }) {
+  const qc = useQueryClient();
+  const [seg, setSeg] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+
+  const { data: segments } = useQuery({
+    queryKey: ["segments"],
+    queryFn: listSegments,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const mutation = useMutation({
+    mutationFn: () => overrideSegment(id, seg!, reason.trim() || undefined),
+    onSuccess: (res) => {
+      // Re-fetch the profile so the displayed current segment updates if it changed.
+      qc.invalidateQueries({ queryKey: ["customer", id] });
+      notifications.show({
+        message: res.changed
+          ? `Segment override saved (${res.override_segment})`
+          : "No change — that override was already set",
+        color: res.changed ? "teal" : "gray",
+      });
+    },
+    onError: (e) => notifications.show({ message: (e as Error).message, color: "red" }),
+  });
+
+  const options = (segments ?? []).map((s) => ({
+    value: s.segment_id,
+    label: s.segment_name ? `${s.segment_name} (${s.segment_id})` : s.segment_id,
+  }));
+
+  return (
+    <Card withBorder radius="md" padding="lg" maw={480}>
+      <Text size="sm" c="dimmed" tt="uppercase" fw={600}>
+        Current segment
+      </Text>
+      <Text size="lg" fw={700} mb="md">
+        {currentSegment ?? "—"}
+      </Text>
+
+      <Select
+        label="Override segment"
+        placeholder="Choose a segment"
+        data={options}
+        value={seg}
+        onChange={setSeg}
+        mb="sm"
+      />
+      <Textarea
+        label="Reason (optional)"
+        placeholder="Why override?"
+        value={reason}
+        onChange={(e) => setReason(e.currentTarget.value)}
+        autosize
+        minRows={2}
+        mb="sm"
+      />
+      <Group justify="flex-end">
+        <Button
+          color="lava"
+          onClick={() => mutation.mutate()}
+          loading={mutation.isPending}
+          disabled={!seg}
+        >
+          Save override
+        </Button>
+      </Group>
+    </Card>
+  );
+}
+
 export default function CustomerDetail() {
   const { id = "" } = useParams();
 
@@ -201,12 +351,8 @@ export default function CustomerDetail() {
             <Tabs.Tab value="profile">Profile</Tabs.Tab>
             <Tabs.Tab value="activity">Activity</Tabs.Tab>
             <Tabs.Tab value="metrics">Metrics</Tabs.Tab>
-            <Tabs.Tab value="notes" disabled>
-              Notes (T3C)
-            </Tabs.Tab>
-            <Tabs.Tab value="segment" disabled>
-              Segment (T3C)
-            </Tabs.Tab>
+            <Tabs.Tab value="notes">Notes</Tabs.Tab>
+            <Tabs.Tab value="segment">Segment</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="profile" pt="md">
@@ -217,6 +363,12 @@ export default function CustomerDetail() {
           </Tabs.Panel>
           <Tabs.Panel value="metrics" pt="md">
             <MetricsTab id={id} />
+          </Tabs.Panel>
+          <Tabs.Panel value="notes" pt="md">
+            <NotesTab id={id} />
+          </Tabs.Panel>
+          <Tabs.Panel value="segment" pt="md">
+            <SegmentTab id={id} currentSegment={data.profile.segment_id} />
           </Tabs.Panel>
         </Tabs>
       )}

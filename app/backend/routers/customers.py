@@ -20,8 +20,9 @@ import time
 from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
-from ..auth import obo_client
+from ..auth import caller_email, obo_client
 from ..db import lakebase_sp
 from ..models import (
     CategorySpend,
@@ -29,11 +30,31 @@ from ..models import (
     CustomerDetail,
     CustomerMetrics,
     CustomerProfile,
+    Note,
+    NoteCreate,
     Page,
     Segment,
+    SegmentOverrideCreate,
+    SegmentOverrideResult,
     Transaction,
 )
 from ..warehouse import run_query
+
+
+def _require_actor(request: Request) -> str:
+    """The human behind an audited write, from X-Forwarded-Email. 400 if absent.
+
+    Lakebase runs as the app SP (no per-user DB identity), so we attribute writes to the
+    calling user via this header. Behind the Apps proxy it's always present; a missing value
+    means the endpoint was reached outside the proxy — reject rather than write a null actor.
+    """
+    email = caller_email(request)
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-Forwarded-Email — audited writes require a known actor.",
+        )
+    return email
 
 log = logging.getLogger(__name__)
 
@@ -226,3 +247,102 @@ def list_segments(request: Request) -> list[Segment]:
     segments = [Segment(segment_id=r["segment_id"], segment_name=r.get("segment_name")) for r in rows]
     _segments_cache["all"] = segments
     return segments
+
+
+# ---------------------------------------------------------------------------
+# Writes (T3C) — notes + segment overrides. All via the app SP (lakebase_sp), each paired
+# with a customer_audit_log row in the SAME transaction (master_plan §7 transactional
+# integrity). Actor = X-Forwarded-Email. lakebase_sp() yields a non-autocommit connection,
+# so the two INSERTs + commit() are atomic; any exception rolls back on context exit.
+# ---------------------------------------------------------------------------
+@router.get("/customers/{customer_id}/notes", response_model=list[Note])
+def list_notes(customer_id: str) -> list[Note]:
+    """Notes for a customer, newest first (Lakebase staging, app SP)."""
+    with lakebase_sp() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT note_id, customer_id, author_email, note_text, created_at "
+                "FROM customer_notes_staging WHERE customer_id = %s "
+                "ORDER BY created_at DESC LIMIT 100",
+                [customer_id],
+            )
+            rows = cur.fetchall()
+    return [Note(note_id=str(r["note_id"]), **{k: r[k] for k in ("customer_id", "author_email", "note_text", "created_at")}) for r in rows]
+
+
+@router.post("/customers/{customer_id}/notes", response_model=Note, status_code=201)
+def add_note(customer_id: str, body: NoteCreate, request: Request) -> Note:
+    """INSERT a note AND append an audit row in one transaction (app SP)."""
+    actor = _require_actor(request)
+    with lakebase_sp() as conn:
+        try:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "INSERT INTO customer_notes_staging (customer_id, author_email, note_text) "
+                    "VALUES (%s, %s, %s) "
+                    "RETURNING note_id, customer_id, author_email, note_text, created_at",
+                    [customer_id, actor, body.note_text],
+                )
+                note = cur.fetchone()
+                cur.execute(
+                    "INSERT INTO customer_audit_log (customer_id, action, actor_email, payload) "
+                    "VALUES (%s, %s, %s, %s)",
+                    [
+                        customer_id,
+                        "add_note",
+                        actor,
+                        Jsonb({"note_id": str(note["note_id"]), "note_text": body.note_text}),
+                    ],
+                )
+            conn.commit()  # both rows or neither
+        except Exception:
+            conn.rollback()
+            raise
+    return Note(note_id=str(note["note_id"]), **{k: note[k] for k in ("customer_id", "author_email", "note_text", "created_at")})
+
+
+@router.post("/customers/{customer_id}/segment", response_model=SegmentOverrideResult)
+def override_segment(customer_id: str, body: SegmentOverrideCreate, request: Request) -> SegmentOverrideResult:
+    """Idempotent UPSERT of a segment override + conditional audit, in one transaction.
+
+    Re-submitting the SAME override_segment is a no-op (the `ON CONFLICT ... WHERE value
+    changed` guard means no row is written and no audit is logged). A real change updates the
+    single row (UNIQUE customer_id) and writes one audit entry.
+    """
+    actor = _require_actor(request)
+    with lakebase_sp() as conn:
+        try:
+            with conn.cursor(row_factory=dict_row) as cur:
+                # INSERT-or-UPDATE keyed on UNIQUE(customer_id). The WHERE on DO UPDATE makes a
+                # same-value resubmit affect 0 rows → idempotent (rowcount==0, no dup, no audit).
+                cur.execute(
+                    "INSERT INTO customer_segment_overrides_staging "
+                    "  (customer_id, override_segment, reason, author_email) "
+                    "VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (customer_id) DO UPDATE SET "
+                    "  override_segment = EXCLUDED.override_segment, "
+                    "  reason = EXCLUDED.reason, author_email = EXCLUDED.author_email, "
+                    "  created_at = NOW(), processed = FALSE, processed_at = NULL "
+                    "WHERE customer_segment_overrides_staging.override_segment "
+                    "      IS DISTINCT FROM EXCLUDED.override_segment",
+                    [customer_id, body.override_segment, body.reason, actor],
+                )
+                changed = cur.rowcount > 0
+                if changed:
+                    cur.execute(
+                        "INSERT INTO customer_audit_log (customer_id, action, actor_email, payload) "
+                        "VALUES (%s, %s, %s, %s)",
+                        [
+                            customer_id,
+                            "override_segment",
+                            actor,
+                            Jsonb({"override_segment": body.override_segment, "reason": body.reason}),
+                        ],
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return SegmentOverrideResult(
+        customer_id=customer_id, override_segment=body.override_segment, changed=changed
+    )

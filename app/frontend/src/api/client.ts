@@ -71,6 +71,20 @@ export interface Segment {
   segment_name: string | null;
 }
 
+export interface Note {
+  note_id: string;
+  customer_id: string;
+  author_email: string;
+  note_text: string;
+  created_at: string;
+}
+
+export interface SegmentOverrideResult {
+  customer_id: string;
+  override_segment: string;
+  changed: boolean;
+}
+
 export interface WhoAmI {
   identity: string;
   user_name: string | null;
@@ -88,6 +102,25 @@ async function apiGet<T>(path: string): Promise<T> {
     try {
       const body = await res.json();
       detail = body.detail ?? detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(`${res.status}: ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function apiSend<T>(path: string, method: "POST", body: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const b = await res.json();
+      detail = b.detail ?? detail;
     } catch {
       /* non-JSON error body */
     }
@@ -125,6 +158,25 @@ export function getCustomerMetrics(id: string): Promise<CustomerMetrics> {
 
 export function listSegments(): Promise<Segment[]> {
   return apiGet<Segment[]>("/segments");
+}
+
+export function listNotes(id: string): Promise<Note[]> {
+  return apiGet<Note[]>(`/customers/${encodeURIComponent(id)}/notes`);
+}
+
+export function addNote(id: string, note_text: string): Promise<Note> {
+  return apiSend<Note>(`/customers/${encodeURIComponent(id)}/notes`, "POST", { note_text });
+}
+
+export function overrideSegment(
+  id: string,
+  override_segment: string,
+  reason?: string,
+): Promise<SegmentOverrideResult> {
+  return apiSend<SegmentOverrideResult>(`/customers/${encodeURIComponent(id)}/segment`, "POST", {
+    override_segment,
+    reason,
+  });
 }
 
 export function whoami(): Promise<WhoAmI> {
