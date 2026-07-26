@@ -15,6 +15,14 @@ variables:
 include:
   - resources/*.yml
 
+# The built React bundle lands in app/backend/static/, which .gitignore excludes (we don't
+# want build artifacts in git during dev). But `bundle deploy` sync respects .gitignore, so
+# without this the SPA wouldn't upload and the deployed app would 404 the UI (T3 D6). Force
+# the built static dir into the deploy upload. (In T8/git-source we instead commit the bundle.)
+sync:
+  include:
+    - app/backend/static/**
+
 targets:
   dev:
     mode: development
