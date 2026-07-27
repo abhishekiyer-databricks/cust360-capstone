@@ -1,0 +1,34 @@
+# T7 — Forward-ETL job (Pattern A: psycopg + Spark MERGE INTO gold).
+#
+# Declared in the bundle so it's version-controlled and doesn't drift from a hand-clicked job
+# (this is also the exact artifact T8 formalizes). `bundle deploy` uploads the notebook and
+# creates/updates this job; the app triggers it by id via the Jobs API as the app SP.
+resources:
+  jobs:
+    forward_etl:
+      name: customer360_forward_etl
+      description: "Promote Lakebase staging (notes / segment overrides) into Delta gold (T7)."
+
+      # The app service principal triggers runs from the Reports button (jobs.run_now).
+      # Without CAN_MANAGE_RUN the SP call returns PERMISSION_DENIED (t7_plan D3).
+      permissions:
+        - level: CAN_MANAGE_RUN
+          service_principal_name: 10c64b22-ac46-4123-bb60-041dc9d4fa92
+
+      tasks:
+        - task_key: merge_staging_to_gold
+          notebook_task:
+            notebook_path: ../lakebase/forward_etl/pattern_a_psycopg2/forward_etl_merge.py
+            base_parameters:
+              instance_name: ai27-lb-apps-capstone
+              database_name: cust360ai27
+              catalog: ai_27
+              schema: lakebase_apps_capstone_gold
+          # Serverless job compute — no cluster to manage (t7_plan D1).
+          # If serverless notebook tasks are disabled on this workspace, replace the line
+          # above with a `job_cluster_key` and add a `job_clusters:` block with a single-node
+          # cluster (e.g. num_workers: 0, a current spark_version, a small node_type_id).
+
+      # In dev (mode: development) the job runs as the deployer, who owns gold + staging, so no
+      # extra UC/PG grants are needed. Production hardening (run_as the app SP + grant it
+      # MODIFY on gold) is a T8/reflection note (t7_plan D3).
