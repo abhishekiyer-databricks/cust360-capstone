@@ -100,8 +100,24 @@ def db_check():
 
 @app.get("/api/config")
 def get_config():
-    """Non-secret ids the React app needs (warehouse / dashboard / Genie)."""
+    """Non-secret ids the React app needs (host / warehouse / dashboard / Genie).
+
+    `databricks_host` is the workspace URL the frontend builds the dashboard embed URL from
+    (T4: `${host}/embed/dashboardsv3/${dashboard_id}`) and the Genie "open in workspace"
+    deep link from (T5). It's injected by the Apps runtime as DATABRICKS_HOST — never
+    hardcoded in the frontend.
+
+    IMPORTANT: on the Apps runtime DATABRICKS_HOST arrives WITHOUT a scheme (e.g.
+    "adb-….azuredatabricks.net"). A frontend URL built from a scheme-less host is treated as
+    a *relative* path by the browser → it resolves against the app's own origin, and our SPA
+    catch-all serves index.html → the dashboard iframe loads the app itself (infinite
+    nesting). So we normalize to an absolute https:// URL here.
+    """
+    host = config.DATABRICKS_HOST
+    if host and not host.startswith(("http://", "https://")):
+        host = f"https://{host}"
     return {
+        "databricks_host": host,
         "warehouse_id": config.WAREHOUSE_ID,
         "dashboard_id": config.DASHBOARD_ID,
         "genie_space_id": config.GENIE_SPACE_ID,

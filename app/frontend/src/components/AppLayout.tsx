@@ -12,7 +12,7 @@ import { whoami } from "../api/client";
 
 const NAV = [
   { label: "Customers", to: "/customers", icon: IconUsers, enabled: true },
-  { label: "Dashboard", to: "/dashboard", icon: IconChartBar, enabled: false },
+  { label: "Dashboard", to: "/dashboard", icon: IconChartBar, enabled: true },
   { label: "Reports", to: "/reports", icon: IconReportAnalytics, enabled: true },
 ];
 

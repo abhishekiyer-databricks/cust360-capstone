@@ -85,6 +85,15 @@ export interface SegmentOverrideResult {
   changed: boolean;
 }
 
+// Non-secret ids from GET /api/config. `databricks_host` builds the dashboard embed URL
+// (T4) and the Genie "open in workspace" link (T5); ids are used by their respective pages.
+export interface AppConfig {
+  databricks_host: string | null;
+  warehouse_id: string | null;
+  dashboard_id: string | null;
+  genie_space_id: string | null;
+}
+
 export interface WhoAmI {
   identity: string;
   user_name: string | null;
@@ -192,6 +201,10 @@ export function overrideSegment(
     override_segment,
     reason,
   });
+}
+
+export function getConfig(): Promise<AppConfig> {
+  return apiGet<AppConfig>("/config");
 }
 
 export function whoami(): Promise<WhoAmI> {
