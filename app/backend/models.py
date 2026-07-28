@@ -136,3 +136,27 @@ class SegmentOverrideResult(BaseModel):
     customer_id: str
     override_segment: str
     changed: bool  # False when re-submitting the same value (idempotent no-op)
+
+
+# ---------------------------------------------------------------------------
+# Forward-ETL job (T7) — the Reports page triggers the job (as the app SP) and polls status.
+# These trim the raw Jobs SDK objects down to what the UI needs.
+# ---------------------------------------------------------------------------
+class JobRunTriggered(BaseModel):
+    """Returned by POST /run-forward-etl — enough to start polling."""
+
+    run_id: int
+    run_page_url: str | None = None
+
+
+class JobRun(BaseModel):
+    """A single job run, trimmed for the status indicator + recent-runs table."""
+
+    run_id: int
+    # life_cycle_state: PENDING / RUNNING / TERMINATING / TERMINATED / SKIPPED / INTERNAL_ERROR
+    life_cycle_state: str | None = None
+    # result_state (only once terminal): SUCCESS / FAILED / TIMEDOUT / CANCELED
+    result_state: str | None = None
+    start_time: int | None = None  # epoch ms (as the Jobs API returns)
+    end_time: int | None = None
+    run_page_url: str | None = None

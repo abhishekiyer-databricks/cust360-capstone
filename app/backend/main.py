@@ -27,7 +27,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
 from .auth import caller_email, obo_client, sp_client
 from .db import lakebase_sp
-from .routers import customers
+from .routers import customers, jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ app.add_middleware(RequestIdMiddleware)
 # API routers
 # ---------------------------------------------------------------------------
 app.include_router(customers.router)
+app.include_router(jobs.router)
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +66,7 @@ app.include_router(customers.router)
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "customer360", "stage": "t3-3a"}
+    return {"status": "ok", "service": "customer360", "stage": "t7-7b"}
 
 
 @app.get("/api/whoami")

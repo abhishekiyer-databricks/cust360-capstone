@@ -7,6 +7,7 @@ import AppLayout from "./components/AppLayout";
 // Code-split routes so the initial bundle stays small (master_plan §7 React perf).
 const Customers = lazy(() => import("./pages/Customers"));
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
+const Reports = lazy(() => import("./pages/Reports"));
 const Placeholder = lazy(() => import("./pages/Placeholder"));
 
 export default function App() {
@@ -27,10 +28,7 @@ export default function App() {
             path="/dashboard"
             element={<Placeholder title="Dashboard" note="Embedded AI/BI dashboard — T4." />}
           />
-          <Route
-            path="/reports"
-            element={<Placeholder title="Reports" note="Forward-ETL runs — T7." />}
-          />
+          <Route path="/reports" element={<Reports />} />
           <Route path="*" element={<Navigate to="/customers" replace />} />
         </Routes>
       </Suspense>

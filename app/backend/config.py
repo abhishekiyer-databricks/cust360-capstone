@@ -43,6 +43,11 @@ WAREHOUSE_ID: str | None = _get("WAREHOUSE_ID")
 DASHBOARD_ID: str | None = _get("DASHBOARD_ID")
 GENIE_SPACE_ID: str | None = _get("GENIE_SPACE_ID")
 
+# Forward-ETL job (T7). The app SP triggers this job by id (jobs.run_now). Set as a plain
+# env value after the job's first `bundle deploy` creates it; T6 upgrades this to a
+# `valueFrom` binding of the jobs resource in resources/app.yml.
+FORWARD_ETL_JOB_ID: str | None = _get("FORWARD_ETL_JOB_ID")
+
 # Gold Delta catalog/schema — the SQL-warehouse (OBO) read path for metrics + segments (T3B).
 # The synced tables are the fast SP read path; these gold tables are queried via the warehouse.
 CAPSTONE_CATALOG: str | None = _get("CAPSTONE_CATALOG")

@@ -92,6 +92,21 @@ export interface WhoAmI {
   email_from_header: string | null;
 }
 
+// Forward-ETL job (T7)
+export interface JobRunTriggered {
+  run_id: number;
+  run_page_url: string | null;
+}
+
+export interface JobRun {
+  run_id: number;
+  life_cycle_state: string | null;
+  result_state: string | null;
+  start_time: number | null;
+  end_time: number | null;
+  run_page_url: string | null;
+}
+
 // ---- Core fetch ----------------------------------------------------------
 async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -181,4 +196,17 @@ export function overrideSegment(
 
 export function whoami(): Promise<WhoAmI> {
   return apiGet<WhoAmI>("/whoami");
+}
+
+// ---- Forward-ETL job (T7) ------------------------------------------------
+export function runForwardEtl(): Promise<JobRunTriggered> {
+  return apiSend<JobRunTriggered>("/jobs/run-forward-etl", "POST", {});
+}
+
+export function getJobRun(runId: number): Promise<JobRun> {
+  return apiGet<JobRun>(`/jobs/${runId}`);
+}
+
+export function listJobRuns(): Promise<JobRun[]> {
+  return apiGet<JobRun[]>("/jobs/runs");
 }

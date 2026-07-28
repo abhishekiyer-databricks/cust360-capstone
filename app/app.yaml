@@ -29,6 +29,10 @@ env:
     value: "01f187f4c665171295386e8e783eb17d"
   - name: "GENIE_SPACE_ID"
     value: "01f187f4edaa146f889fecdc69cc2544"
+  # Forward-ETL job id (T7). The Reports button triggers this job as the app SP.
+  # TODO(T6): replace with a valueFrom binding of the `forward_etl` jobs resource.
+  - name: "FORWARD_ETL_JOB_ID"
+    value: "31418249274366"
   # Gold Delta catalog/schema — SQL-warehouse (OBO) read path for metrics + segments (T3B)
   - name: "CAPSTONE_CATALOG"
     value: "ai_27"

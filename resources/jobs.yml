@@ -11,9 +11,14 @@ resources:
 
       # The app service principal triggers runs from the Reports button (jobs.run_now).
       # Without CAN_MANAGE_RUN the SP call returns PERMISSION_DENIED (t7_plan D3).
+      #
+      # Reference the app's SP as a bundle output instead of hardcoding its client_id — the
+      # app resource exposes `service_principal_client_id`, and DABs resolves it at deploy time
+      # (creating the app first, then the job). Portable to any workspace; engine-agnostic
+      # (works under both the Terraform and the new direct deployment engine).
       permissions:
         - level: CAN_MANAGE_RUN
-          service_principal_name: 10c64b22-ac46-4123-bb60-041dc9d4fa92
+          service_principal_name: ${resources.apps.customer360.service_principal_client_id}
 
       tasks:
         - task_key: merge_staging_to_gold

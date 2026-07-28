@@ -96,3 +96,48 @@ Built as **three deployable slices**, each verified end-to-end against live data
 `X-Request-Id`, slow-query logging, parameterized SQL everywhere, TanStack Query per-key staleTimes
 (list 10s / detail 30s / metrics 60s / segments 5m) + invalidate-after-write, debounced filters,
 code-split routes.
+
+### ✅ T7 — Forward ETL: Lakebase staging → Delta gold
+Closes the write loop: notes/overrides the app stages in Lakebase are promoted back into Delta gold,
+on demand, from the **Reports** page. Built as **two slices**, both verified end-to-end.
+
+**Pattern A chosen (psycopg + Spark `MERGE INTO`), not Pattern B.** We re-checked the "native"
+alternative: the task doc calls it *Lakehouse Sync (Beta)*, but that label is stale — it's now
+**Lakebase Change Data Feed (CDF)**, **Public Preview** (not GA). We deliberately chose Pattern A
+anyway because: (1) CDF is still preview; (2) its replication is **continuous-only** (no on-demand
+trigger/flush API) so the "Run forward-ETL" button maps poorly to it; (3) it still needs a consumer
+job to dedup `lb_*_history` into gold, so it doesn't remove the work; (4) Pattern A makes the
+read→MERGE→mark loop + idempotency explicit and forces creating `gold.customer_notes` — the write
+path we want to demonstrate. *Reflection point: deliberate engineering trade-off, knowing the native
+feature exists; would revisit CDF for high-volume streaming / SCD2 audit needs, once GA.*
+
+- **7A — the ETL job:**
+  - `lakebase/forward_etl/pattern_a_psycopg2/forward_etl_merge.py` (serverless job): reads
+    `*_staging WHERE processed=false` over psycopg → builds Spark DataFrames → `MERGE INTO` gold →
+    marks those rows `processed=true`. Notes → **new** `gold.customer_notes` (MERGE on `note_id`,
+    INSERT-only; **table created by the job**, `CREATE TABLE IF NOT EXISTS`); overrides → `UPDATE
+    gold.customers.segment_id` (MERGE on `customer_id`). Audit log stays in Lakebase.
+  - `resources/jobs.yml` — DABs job `customer360_forward_etl`, app SP granted `CAN_MANAGE_RUN`.
+  - **Key correctness point (reflection):** MERGE (Delta) and the `processed` flag (Postgres) are in
+    **two systems — no single cross-system transaction.** Order = **merge first, mark second**;
+    idempotency comes from MERGE-on-key + the `processed` filter, not a 2-phase commit. Proven live:
+    the first run crashed at mark-processed (a UUID cast bug) *after* the MERGEs — gold still ended
+    with exactly the right rows, and the re-run flagged them with **zero duplication**.
+- **7B — app wiring + Reports page:**
+  - `app/backend/routers/jobs.py` (all as the **app SP**, not OBO): `POST /api/jobs/run-forward-etl`
+    (`jobs.run_now`), `GET /api/jobs/{run_id}` (poll), `GET /api/jobs/runs` (history). 503 if job id
+    unconfigured, 502 on SDK failure. `FORWARD_ETL_JOB_ID` via `app.yaml` env (→ `valueFrom` in T6).
+  - `Reports.tsx`: "Run forward-ETL" button + live status badge (polls every 3s, stops at terminal)
+    + recent-runs table with "Open in workspace" deep links.
+
+**Verified end-to-end on the deployed app** (notes + 5 segment overrides added via the UI, then run
+from the Reports button): `gold.customer_notes` = 5 rows / 5 distinct note_ids; all 5 overrides
+propagated to `gold.customers.segment_id`; staging flags flipped to `processed=true` (proving the SP
+`CAN_MANAGE_RUN` trigger path); **re-run with nothing new = no-op** (`notes_merged:0, overrides_merged:0`).
+
+**Portability / packaging notes (for T8):** `jobs.yml` references the app SP as
+`${resources.apps.customer360.service_principal_client_id}` (DABs output, resolved at deploy time) —
+no hardcoded UUID, portable to any workspace, engine-agnostic. Deferred to T8: switch the job's
+**prod** `run_as` to the app SP (+ grant it `USE CATALOG/SCHEMA` + `MODIFY` on gold via a bundle
+`grants` block), and note the **direct deployment engine** (no-Terraform; migrate with
+`bundle deployment migrate`, CLI ≥ 0.279.0; caveat — removing a YAML field reverts it to default).

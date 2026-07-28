@@ -13,7 +13,7 @@ import { whoami } from "../api/client";
 const NAV = [
   { label: "Customers", to: "/customers", icon: IconUsers, enabled: true },
   { label: "Dashboard", to: "/dashboard", icon: IconChartBar, enabled: false },
-  { label: "Reports", to: "/reports", icon: IconReportAnalytics, enabled: false },
+  { label: "Reports", to: "/reports", icon: IconReportAnalytics, enabled: true },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
