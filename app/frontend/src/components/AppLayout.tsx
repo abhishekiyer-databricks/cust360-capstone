@@ -1,14 +1,10 @@
-import { AppShell, Badge, Group, NavLink, Text, Title, ActionIcon, Tooltip } from "@mantine/core";
-import {
-  IconUsers,
-  IconChartBar,
-  IconReportAnalytics,
-  IconMessageChatbot,
-} from "@tabler/icons-react";
+import { AppShell, Badge, Group, NavLink, Text, Title } from "@mantine/core";
+import { IconUsers, IconChartBar, IconReportAnalytics } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { NavLink as RouterNavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink as RouterNavLink, useLocation } from "react-router-dom";
 
 import { whoami } from "../api/client";
+import GenieWidget from "./GenieWidget";
 
 const NAV = [
   { label: "Customers", to: "/customers", icon: IconUsers, enabled: true },
@@ -18,7 +14,6 @@ const NAV = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const navigate = useNavigate();
 
   // Top-bar identity. staleTime long — identity doesn't change within a session.
   const { data: me } = useQuery({
@@ -87,24 +82,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <AppShell.Main bg="#F6F5F2">{children}</AppShell.Main>
 
-      {/* Floating "Ask Genie" button (stub — wired in T5). */}
-      <Tooltip label="Ask Genie (coming in T5)" position="left">
-        <ActionIcon
-          size={54}
-          radius="xl"
-          color="lava"
-          variant="filled"
-          onClick={() => navigate(location.pathname)}
-          style={{
-            position: "fixed",
-            bottom: 24,
-            right: 24,
-            boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
-          }}
-        >
-          <IconMessageChatbot size={26} />
-        </ActionIcon>
-      </Tooltip>
+      {/* Floating "Ask Genie" chat overlay (T5). */}
+      <GenieWidget />
     </AppShell>
   );
 }

@@ -101,6 +101,26 @@ export interface WhoAmI {
   email_from_header: string | null;
 }
 
+// Genie chat (T5) — mirror app/backend/models.py
+export interface GenieMessageRef {
+  conversation_id: string;
+  message_id: string;
+}
+
+export interface GenieResult {
+  columns: string[];
+  rows: (string | null)[][];
+  truncated: boolean;
+}
+
+export interface GenieMessage {
+  status: string; // COMPLETED / EXECUTING_QUERY / FAILED / …
+  content: string | null;
+  query: string | null;
+  result: GenieResult | null;
+  error: string | null;
+}
+
 // Forward-ETL job (T7)
 export interface JobRunTriggered {
   run_id: number;
@@ -209,6 +229,33 @@ export function getConfig(): Promise<AppConfig> {
 
 export function whoami(): Promise<WhoAmI> {
   return apiGet<WhoAmI>("/whoami");
+}
+
+// ---- Genie chat (T5) -----------------------------------------------------
+export function startGenieConversation(content: string): Promise<GenieMessageRef> {
+  return apiSend<GenieMessageRef>("/genie/conversations", "POST", { content });
+}
+
+export function sendGenieMessage(
+  conversationId: string,
+  content: string,
+): Promise<GenieMessageRef> {
+  return apiSend<GenieMessageRef>(
+    `/genie/conversations/${encodeURIComponent(conversationId)}/messages`,
+    "POST",
+    { content },
+  );
+}
+
+export function getGenieMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<GenieMessage> {
+  return apiGet<GenieMessage>(
+    `/genie/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(
+      messageId,
+    )}`,
+  );
 }
 
 // ---- Forward-ETL job (T7) ------------------------------------------------

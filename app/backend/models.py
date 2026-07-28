@@ -160,3 +160,44 @@ class JobRun(BaseModel):
     start_time: int | None = None  # epoch ms (as the Jobs API returns)
     end_time: int | None = None
     run_page_url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Genie chat (T5) — three OBO endpoints wrap the async Conversation API. Our backend is
+# stateless: the frontend owns conversation_id + message_id and passes them back, so these
+# request/response models are thin pass-throughs to the SDK.
+# ---------------------------------------------------------------------------
+class GenieAsk(BaseModel):
+    """A question — for both the first message (start) and follow-ups (create_message)."""
+
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class GenieMessageRef(BaseModel):
+    """Handles returned when a message is submitted — enough for the client to start polling."""
+
+    conversation_id: str
+    message_id: str
+
+
+class GenieResult(BaseModel):
+    """A tabular query result preview (Genie ran SQL to answer)."""
+
+    columns: list[str]
+    rows: list[list[str | None]]
+    truncated: bool = False
+
+
+class GenieMessage(BaseModel):
+    """Normalized poll response the widget renders.
+
+    `status` is the raw MessageStatus enum value (COMPLETED / EXECUTING_QUERY / FAILED / …);
+    the client polls until it's terminal. `content` is the text answer (if any); `query` is
+    the SQL Genie generated (if it answered with a query); `result` is that query's rows.
+    """
+
+    status: str
+    content: str | None = None
+    query: str | None = None
+    result: GenieResult | None = None
+    error: str | None = None
