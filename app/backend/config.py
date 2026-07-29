@@ -5,8 +5,9 @@ platform-injected service-principal creds (`DATABRICKS_CLIENT_ID`,
 `DATABRICKS_CLIENT_SECRET`, `DATABRICKS_HOST`). Locally they come from `app/.env`
 (loaded here via python-dotenv) so smoke tests can import the module without crashing.
 
-Nothing here is a secret: only ids/hostnames. Secret-backed values (`valueFrom`) are a
-T6 concern.
+Values arrive either as plain ids/hostnames or, for the Lakebase connection vars and the
+forward-ETL job id, resolved by the runtime from `valueFrom` resource bindings (T6, see
+resources/app.yml). Either way this module just reads them from the environment.
 """
 from __future__ import annotations
 
@@ -43,9 +44,9 @@ WAREHOUSE_ID: str | None = _get("WAREHOUSE_ID")
 DASHBOARD_ID: str | None = _get("DASHBOARD_ID")
 GENIE_SPACE_ID: str | None = _get("GENIE_SPACE_ID")
 
-# Forward-ETL job (T7). The app SP triggers this job by id (jobs.run_now). Set as a plain
-# env value after the job's first `bundle deploy` creates it; T6 upgrades this to a
-# `valueFrom` binding of the jobs resource in resources/app.yml.
+# Forward-ETL job (T7). The app SP triggers this job by id (jobs.run_now). T6 bound this to
+# the bundle-managed `forward_etl` job via a `valueFrom` resource binding in resources/app.yml,
+# so the id resolves at deploy (no hardcoded number). Still read from the env here.
 FORWARD_ETL_JOB_ID: str | None = _get("FORWARD_ETL_JOB_ID")
 
 # Gold Delta catalog/schema — the SQL-warehouse (OBO) read path for metrics + segments (T3B).

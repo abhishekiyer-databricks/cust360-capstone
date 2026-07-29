@@ -141,3 +141,64 @@ no hardcoded UUID, portable to any workspace, engine-agnostic. Deferred to T8: s
 **prod** `run_as` to the app SP (+ grant it `USE CATALOG/SCHEMA` + `MODIFY` on gold via a bundle
 `grants` block), and note the **direct deployment engine** (no-Terraform; migrate with
 `bundle deployment migrate`, CLI ≥ 0.279.0; caveat — removing a YAML field reverts it to default).
+
+### ✅ T4 — Embed the AI/BI dashboard
+Reps see broader analytics in-app via an `<iframe>` — the supported embed pattern; the dashboard
+authenticates the *viewer* itself, so there's no data/API plumbing.
+- `/api/config` gained `databricks_host`; `Dashboard.tsx` renders `${host}/embed/dashboardsv3/${dashboard_id}`.
+- **Gotcha (root-caused live):** the Apps runtime injects `DATABRICKS_HOST` **without a scheme**
+  (`adb-….net`, unlike `.env` which has `https://`). A scheme-less host makes the iframe `src` a
+  **relative** URL → it resolves against the app's own origin → our SPA catch-all serves `index.html`
+  → **the dashboard iframe loaded the whole app again, nesting infinitely.** Fix: normalize to
+  `https://{host}` in `/api/config` (+ defensively in the frontend). *Reflection point.*
+- Workspace embed allowlist already covered our host via `*.databricksapps.com` (matches at any
+  sub-label depth) — no action needed. **Verified: dashboard renders in-app with data.**
+
+### ✅ T5 — Genie chat (floating overlay, OBO)
+Natural-language Q&A over gold, as the **calling user** (OBO), so Genie's own governance/audit apply.
+- `routers/genie.py` — 3 OBO endpoints wrapping the async **Conversation API**: start conversation /
+  create follow-up message / poll `get_message`; on `COMPLETED` with a query attachment, fetch the
+  attachment's result rows (capped at 50 for the preview). No token → 401; `PermissionDenied` → 403;
+  SDK error → 502. *(SDK surface verified against installed v0.122.0 before coding — `start_conversation`
+  / `create_message` return `Wait[GenieMessage]`, `.response` = initial message.)*
+- **Backend is stateless; the frontend owns `conversation_id` + `message_id`** and drives the poll loop
+  — reusing `conversation_id` is what preserves context. Each GET is one `get_message` call, so no
+  request hangs.
+- `GenieWidget.tsx` — floating bottom-right launcher → chat panel: client poll loop (1.5s interval,
+  **~30s cap** → friendly timeout), typing indicator, **Enlarge** toggle, **"Open in workspace"** deep
+  link (`${host}/genie/rooms/${space_id}`), result-preview table with readable number formatting
+  (Genie returns values as strings, sometimes in scientific notation), and SQL behind a default-closed
+  **"Show SQL"** disclosure. A header **"new chat"** control resets to a fresh thread (confirm popover
+  when messages exist).
+- **Design note (reflection):** Genie conversations are **ephemeral by our choice** — held in React
+  state, single-threaded, wiped on refresh; "New chat" starts fresh and "Open in workspace" is the
+  history escape hatch. The `conversation_id`s *are* durable server-side (SDK `list_conversations` etc.),
+  so persistence (localStorage or a Lakebase per-user table) is a straightforward future add, not a
+  platform limit.
+- **Verified end-to-end against the live Genie space:** "top segment by LTV" → **Champions, $20.38M**
+  with a result preview + generated SQL; follow-up ("top 10 customers in this segment") correctly kept
+  context. No-token → 401.
+- **UI gotcha (root-caused live):** the "new chat" confirm popover appeared to do nothing — Mantine
+  `Popover` portals at default `zIndex: 300`, below the chat panel's `zIndex: 1000`, so it rendered
+  *behind* the panel. Fix: `zIndex={1100}` on the popover.
+
+### ✅ T6 — App configuration finalize (`app.yaml`)
+Because OBO shipped in T2, T6 was **finalize + verify**, not net-new. Three things closed:
+- **Secret `valueFrom` bindings.** Lakebase connection vars (`PGHOST`/`PGDATABASE`/`PG_INSTANCE_NAME`)
+  now resolve from the `capstone-abhishek-iyer` secret scope (keys `pg_host`/`pg_database`/
+  `pg_instance_name`) via `valueFrom` — declared as `resources:` on the app in `resources/app.yml`,
+  referenced by key in `app.yaml`. The runtime resolves a secret binding to the decrypted value.
+- **Job-id resource binding.** `FORWARD_ETL_JOB_ID` was a hardcoded magic number with a `TODO(T6)`;
+  now `valueFrom` a `job:` resource bound to the bundle-managed `forward_etl` job
+  (`id: ${resources.jobs.forward_etl.id}`) — resolves to the real id at deploy, portable across
+  workspaces.
+- **Scope-location call.** OBO scopes stay in `resources/app.yml` `user_api_scopes` (`sql`,
+  `dashboards.genie`), *not* an `app.yaml` `user_authorization` block as the task doc describes —
+  under DABs the app-resource field is authoritative and the two would conflict. Documented in both files.
+- **Secret-vs-config split (reflection):** we bind Postgres *connection* details (arguably sensitive,
+  and in the scope) via `valueFrom`, but leave public identifiers (warehouse/dashboard/Genie/catalog/
+  schema) as plain `value:` — they're not credentials. A deliberate line, not laziness.
+- `bundle validate` passes; secret bindings resolve fully in the compiled bundle (the job `id` stays a
+  `${…}` reference since a job id is a deploy-time computed output). T6's done-when — *app starts with
+  no missing-secret errors* + *OBO reaches SQL + Lakebase + Genie without 401s* — is **exercised by
+  deploying T4 + T5** (dashboard renders, Genie answers, metrics/writes still work).

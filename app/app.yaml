@@ -1,11 +1,19 @@
 # Databricks App runtime config (app.yaml controls how the process starts + env only).
 #
 # OBO / user-authorization SCOPES are NOT set here — they live in the DABs app resource
-# (resources/app.yml → user_api_scopes). app.yaml is runtime-only.
+# (resources/app.yml → user_api_scopes), which is authoritative under DABs. app.yaml is
+# runtime-only. (The task doc's `user_authorization` block would conflict — see resources/app.yml.)
 #
 # The runtime injects DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET for
-# the app service principal — we don't set those. Values below are non-secret ids/hosts;
-# secret-backed valueFrom entries are a T6 concern.
+# the app service principal — we don't set those.
+#
+# T6 — env values come from two places:
+#   * `valueFrom: <key>`  → resolved from a RESOURCE bound in resources/app.yml (`resources:`).
+#     Used for Lakebase connection secrets (decrypted at runtime) and the forward-ETL job id
+#     (resolved from the bundle-managed job) — so nothing sensitive or workspace-specific is
+#     hardcoded here.
+#   * `value: <literal>`  → plain non-secret ids (warehouse/dashboard/Genie/catalog/schema).
+#     These are public identifiers, not credentials, so they stay declarative.
 command:
   - "uvicorn"
   - "backend.main:app"
@@ -15,24 +23,26 @@ command:
   - "8000"
 
 env:
-  # Lakebase (Postgres) — SP connects here as DATABRICKS_CLIENT_ID (the granted PG role)
+  # Lakebase (Postgres) — SP connects here as DATABRICKS_CLIENT_ID (the granted PG role).
+  # Bound from the capstone-abhishek-iyer secret scope via resources/app.yml (T6).
   - name: "PGHOST"
-    value: "ep-plain-art-e1jje7ek.database.eastus2.azuredatabricks.net"
+    valueFrom: "pg_host"
   - name: "PGDATABASE"
-    value: "cust360ai27"
+    valueFrom: "pg_database"
   - name: "PG_INSTANCE_NAME"
-    value: "ai27-lb-apps-capstone"
-  # Data-service ids surfaced via /api/config (used by the frontend from T3+)
+    valueFrom: "pg_instance_name"
+  # Data-service ids surfaced via /api/config (used by the frontend from T3+). Public
+  # identifiers, not secrets → plain values.
   - name: "WAREHOUSE_ID"
     value: "148ccb90800933a1"
   - name: "DASHBOARD_ID"
     value: "01f187f4c665171295386e8e783eb17d"
   - name: "GENIE_SPACE_ID"
     value: "01f187f4edaa146f889fecdc69cc2544"
-  # Forward-ETL job id (T7). The Reports button triggers this job as the app SP.
-  # TODO(T6): replace with a valueFrom binding of the `forward_etl` jobs resource.
+  # Forward-ETL job id (T7). Bound from the bundle-managed `forward_etl` job via
+  # resources/app.yml (T6) — resolves to the real job id at deploy, no hardcoded number.
   - name: "FORWARD_ETL_JOB_ID"
-    value: "31418249274366"
+    valueFrom: "forward_etl_job"
   # Gold Delta catalog/schema — SQL-warehouse (OBO) read path for metrics + segments (T3B)
   - name: "CAPSTONE_CATALOG"
     value: "ai_27"

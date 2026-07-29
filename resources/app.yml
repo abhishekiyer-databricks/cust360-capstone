@@ -18,6 +18,44 @@ resources:
       # carrying these scopes. Exactly what we need: `sql` (warehouse, T3) + `dashboards.genie`
       # (Genie API, T5). Platform auto-adds iam.current-user:read / iam.access-control:read
       # (which is why obo_client(...).current_user.me() works). Public Preview field.
+      #
+      # NOTE (T6): the task doc describes an app.yaml `user_authorization` block for these
+      # scopes. Under DABs the app-RESOURCE field below is authoritative — putting scopes in
+      # both would conflict, so we keep the single source of truth here and leave app.yaml
+      # runtime-only. app.yaml documents this in its header.
       user_api_scopes:
         - sql
         - dashboards.genie
+
+      # T6 — Resource bindings. Each entry gets a `name` (the resource KEY that app.yaml's
+      # `valueFrom` references) + a typed block. The runtime resolves a secret binding to the
+      # decrypted secret value, and a job binding to the job id — so nothing sensitive or
+      # environment-specific is hardcoded in app.yaml.
+      resources:
+        # Lakebase connection secrets (scope capstone-abhishek-iyer). READ only.
+        - name: pg_host
+          description: "Lakebase Postgres host"
+          secret:
+            scope: capstone-abhishek-iyer
+            key: pg_host
+            permission: READ
+        - name: pg_database
+          description: "Lakebase Postgres database"
+          secret:
+            scope: capstone-abhishek-iyer
+            key: pg_database
+            permission: READ
+        - name: pg_instance_name
+          description: "Lakebase instance name"
+          secret:
+            scope: capstone-abhishek-iyer
+            key: pg_instance_name
+            permission: READ
+        # Forward-ETL job (T7). Reference the bundle-managed job's id (not the hardcoded
+        # number) so it stays correct across workspaces. CAN_MANAGE_RUN lets the app SP
+        # trigger it (this is the same grant declared in jobs.yml — idempotent).
+        - name: forward_etl_job
+          description: "Forward-ETL job the Reports button triggers"
+          job:
+            id: ${resources.jobs.forward_etl.id}
+            permission: CAN_MANAGE_RUN

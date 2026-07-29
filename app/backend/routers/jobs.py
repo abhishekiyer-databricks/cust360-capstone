@@ -11,9 +11,9 @@ All three run as the **app service principal** (`sp_client()`), NOT OBO: trigger
 app-level work, not tied to a user (master_plan §3-D2). The SP has CAN_MANAGE_RUN on the job
 (granted declaratively in resources/jobs.yml). No X-Forwarded-* headers are needed here.
 
-The job id comes from `config.FORWARD_ETL_JOB_ID` (set in app.yaml after 7A's deploy; T6
-upgrades it to a valueFrom binding). If it's unset we return 503 — a clear "not configured"
-signal rather than an opaque 500.
+The job id comes from `config.FORWARD_ETL_JOB_ID`, bound in app.yaml via a `valueFrom`
+resource binding of the bundle-managed `forward_etl` job (T6). If it's unset we return 503 —
+a clear "not configured" signal rather than an opaque 500.
 """
 from __future__ import annotations
 
