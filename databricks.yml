@@ -1,16 +1,37 @@
 # DABs bundle root — Customer 360 capstone.
-# T8-min: minimal bundle with a git-source app. Variables + more resources
-# (forward-ETL job, declarative synced tables) grow through T6-T8.
+# T8: the app's SOURCE is set PER-TARGET below (dev = source_code_path for fast iteration,
+# prod = git_repository + git_source = the submission git-source app). Environment-specific
+# ids are variables so the bundle is portable.
 bundle:
   name: customer360
 
 variables:
+  # --- git-source app (T8) ---
   git_repo_url:
     description: HTTPS URL of the git repo the app pulls source from
     default: https://github.com/abhishekiyer-databricks/cust360-capstone
   git_branch:
     description: Branch the git-source app tracks
     default: main
+  # --- workspace resource ids (from master_plan §0) ---
+  warehouse_id:
+    description: SQL warehouse the app queries gold through (OBO)
+    default: "148ccb90800933a1"
+  lakebase_instance:
+    description: Lakebase (Postgres) instance name
+    default: ai27-lb-apps-capstone
+  dashboard_id:
+    description: AI/BI dashboard embedded in the app
+    default: "01f187f4c665171295386e8e783eb17d"
+  genie_space_id:
+    description: Genie space the chat widget talks to (OBO)
+    default: "01f187f4edaa146f889fecdc69cc2544"
+  catalog:
+    description: Unity Catalog holding the Delta gold tables
+    default: ai_27
+  pg_uc_catalog:
+    description: Unity Catalog registered for the Lakebase instance
+    default: ai27_lb_apps_capstone
 
 include:
   - resources/*.yml
@@ -24,13 +45,33 @@ sync:
     - app/backend/static/**
 
 targets:
+  # DEV — fast local iteration: `bundle deploy --target dev` uploads the local app/ folder.
   dev:
     mode: development
     default: true
     workspace:
       host: https://adb-984752964297111.11.azuredatabricks.net
+    resources:
+      apps:
+        customer360:
+          # relative to THIS file (repo root) — app/ is one level down, not ../app
+          source_code_path: ./app
 
+  # PROD — the submission git-source app: Databricks pulls source from GitHub (as the app SP)
+  # on each `bundle run`. NOTE: git_source.source_code_path is the path INSIDE the repo where
+  # app.yaml lives (our app.yaml is at app/app.yaml → "app").
   prod:
     mode: production
     workspace:
       host: https://adb-984752964297111.11.azuredatabricks.net
+      # mode: production requires an explicit single-copy root path.
+      root_path: /Workspace/Users/abhishek.iyer@databricks.com/.bundle/${bundle.name}/${bundle.target}
+    resources:
+      apps:
+        customer360:
+          git_repository:
+            provider: github
+            url: ${var.git_repo_url}
+          git_source:
+            branch: ${var.git_branch}
+            source_code_path: app

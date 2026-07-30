@@ -5,7 +5,9 @@ __pycache__/
 .databricks/
 .DS_Store
 node_modules/
-app/backend/static/
+# T8: the built React bundle (app/backend/static/) IS committed for the git-source app,
+# so the runtime command stays `uvicorn backend.main:app` with no build step on the Apps
+# runtime. Rebuild (`npm run build` in app/frontend/) + commit before each prod deploy.
 dist/
 build/
 *.log

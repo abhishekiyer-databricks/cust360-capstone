@@ -1,19 +1,17 @@
 # Customer 360 — Databricks App.
 #
-# DEV/TEST (now → T7): source_code_path deployment. `bundle deploy` uploads the
-# local app/ folder to the workspace and the app runs from there — no GitHub pull,
-# no Repos Git Proxy, no PAT needed. Deploys to the real Apps runtime so OBO auth
-# (T2+) is testable.
-#
-# T8 (production pattern): switch to a git-source app — replace source_code_path
-# with git_repository (provider/url) + git_source (branch/source_code_path) and
-# register the app SP's git credential. That's the ONLY time the Git Proxy is needed.
+# T8 (production pattern): the app's SOURCE is declared PER-TARGET in databricks.yml,
+# not here — DABs rejects an app that sets BOTH git_source and source_code_path, so this
+# base resource carries no source field:
+#   - targets.dev  → source_code_path: ../app   (fast local iteration, unchanged)
+#   - targets.prod → git_repository + git_source (the submission git-source app; Databricks
+#                    pulls source from GitHub on each `bundle run`, pulled AS the app SP via
+#                    the SP-bound git credential — no Git Proxy, no local upload)
 resources:
   apps:
     customer360:
       name: customer360
       description: "Customer 360 — Databricks Apps + Lakebase capstone"
-      source_code_path: ../app
       # OBO (on-behalf-of user) scopes — T2. The Apps proxy only forwards a user token
       # carrying these scopes. Exactly what we need: `sql` (warehouse, T3) + `dashboards.genie`
       # (Genie API, T5). Platform auto-adds iam.current-user:read / iam.access-control:read

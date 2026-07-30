@@ -1,0 +1,7 @@
+import{a8 as i,l as n,j as s,a9 as d,N as h,aa as l,s as c,ab as g}from"./index-CUFa-qPs.js";/**
+ * @license @tabler/icons-react v3.45.0 - MIT
+ *
+ * This source code is licensed under the MIT license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const b=[["path",{d:"M12 9v4",key:"svg-0"}],["path",{d:"M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0",key:"svg-1"}],["path",{d:"M12 16h.01",key:"svg-2"}]],u=i("outline","alert-triangle","AlertTriangle",b);function v(){const{data:a,isLoading:e,isError:t,error:r}=n({queryKey:["config"],queryFn:g,staleTime:3e5});if(e)return s.jsx(d,{h:"70vh",children:s.jsx(h,{color:"lava"})});if(t||!(a!=null&&a.databricks_host)||!(a!=null&&a.dashboard_id))return s.jsx(l,{icon:s.jsx(u,{size:18}),color:"red",variant:"light",title:"Dashboard unavailable",children:t?`Could not load app config: ${r.message}`:"Missing databricks_host or dashboard_id in /api/config."});const o=`${/^https?:\/\//.test(a.databricks_host)?a.databricks_host:`https://${a.databricks_host}`}/embed/dashboardsv3/${a.dashboard_id}`;return s.jsx(c,{style:{height:"calc(100vh - 56px - 2 * var(--mantine-spacing-md))"},children:s.jsx("iframe",{title:"Customer 360 AI/BI dashboard",src:o,style:{width:"100%",height:"100%",border:0,borderRadius:8}})})}export{v as default};
+//# sourceMappingURL=Dashboard-Yu_q9Pnr.js.map
