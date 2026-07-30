@@ -202,3 +202,44 @@ Because OBO shipped in T2, T6 was **finalize + verify**, not net-new. Three thin
   `${…}` reference since a job id is a deploy-time computed output). T6's done-when — *app starts with
   no missing-secret errors* + *OBO reaches SQL + Lakebase + Genie without 401s* — is **exercised by
   deploying T4 + T5** (dashboard renders, Genie answers, metrics/writes still work).
+
+### ✅ T8 — Deploy as a git-source app (via DABs)
+Switched `customer360` from a workspace-folder upload to the **production git-source pattern**:
+Databricks now pulls the app source from GitHub (`abhishekiyer-databricks/cust360-capstone` @ `main`,
+path `app`) on each `bundle run`, **as the app service principal**.
+- **Per-target source (no `source_code_path` in the base).** DABs rejects an app with *both*
+  `git_source` and `source_code_path`, so the base `resources/app.yml` carries no source; the source is
+  set per-target in `databricks.yml`: **dev** = `source_code_path: ./app` (fast local iteration),
+  **prod** = `git_repository` + `git_source`. `databricks.yml` also gained the full `variables:` set
+  (warehouse/lakebase/dashboard/genie/catalog/pg_uc_catalog + git repo/branch) and a prod
+  `workspace.root_path` (required by `mode: production`).
+- **Committed the built React bundle.** Un-ignored `app/backend/static/` and committed it so the runtime
+  command stays `uvicorn backend.main:app` with no build step (rebuild + commit before each prod deploy).
+- **SP-bound git credential (best practice even though the repo is public).** A git-source app pulls as
+  its **service principal**, not the deploying user — a User-Settings *Linked account* credential does
+  **not** apply. Registered a GitHub PAT (from the repo-owner account `abhishekiyer-databricks`, email
+  `abhishek.iyer@databricks.com`) bound to the app SP via
+  `git-credentials create … "principal_id": 144899163311454` (cred id `963031370981151`). No SP
+  impersonation — run as the normal user.
+- **Gotcha — `409 ALREADY_EXISTS`.** The app already existed (created by the **dev** target) but **prod**
+  has its own state and tried to CREATE it. Fix = adopt, don't rename:
+  `bundle deployment bind customer360 customer360 --target prod --auto-approve`. Consequence: dev + prod
+  now manage the **same** physical app — `deploy --target dev` reverts it to `source_code_path`,
+  `--target prod` restores git-source. Post-T8, prod is the submission source of truth.
+- **Gotcha — Git Proxy cluster.** `bundle deploy` (config) succeeds, but `bundle run` (the real GitHub
+  pull) routes through the workspace **Git Proxy** cluster (`enableGitProxy: true`,
+  `gitProxyClusterId: 0702-202607-z9tgxva7`) and failed `NOT_FOUND: … Cluster is not running` — the
+  shared proxy cluster had auto-terminated (120-min idle). Fix = `databricks clusters start
+  0702-202607-z9tgxva7`, wait for RUNNING, re-run. *Corrected understanding (thanks to a live
+  counter-example — a Git **folder** on this same workspace syncs public github fine): this is NOT an
+  egress/private-repo issue. Git **folders** clone via the control plane directly; git-source **Apps**
+  route their pull through the Git Proxy cluster when `enableGitProxy` is on — a different code path,
+  independent of repo visibility.* No proxy to stand up — just keep the designated cluster running (or,
+  on a workspace you admin, repoint `gitProxyClusterId` at a cluster you own).
+- **`resources/lakebase.yml` deliberately skipped** (not required for done-when): the 3 synced tables are
+  live/online from T1; letting DABs manage them risks a recreate that disrupts active sync. Kept as a
+  documented future item.
+- **Verified (done-when all met):** app `RUNNING`; active deployment shows **git-source** (repo + branch
+  `main` + path `app`), **not** a folder upload; `resolved_commit b3e2bd28…` **matches local `main` HEAD**;
+  UI Source page shows the git repository + branch. Submission deploy path is now
+  `bundle deploy/run --target prod`.

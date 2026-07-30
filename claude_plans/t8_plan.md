@@ -168,6 +168,51 @@ databricks bundle run       customer360 --target prod
 
 ---
 
+## 6b. Git Proxy — the real blocker for `bundle run` (hit live 2026-07-30)
+
+Git-source apps pull source through a **workspace-level Git Proxy**, backed by a cluster.
+`bundle deploy` (config) succeeds without it, but `bundle run` (the actual GitHub pull) fails with
+`NOT_FOUND: Failed to connect to Git Proxy … Cluster <id> is not running` when that cluster is down.
+
+The proxy is **workspace infrastructure, not project config** — 3 `workspace-conf` keys control it:
+- `enableGitProxy: true`
+- `gitProxyClusterId: <cluster-id>` (this workspace → `0702-202607-z9tgxva7`, the shared "Repos Git
+  Proxy" cluster owned by another user; auto-terminates after 120 min idle)
+
+**Redeploy runbook (per workspace):**
+1. Ensure the proxy is enabled: `databricks api get "/api/2.0/workspace-conf?keys=enableGitProxy"`.
+2. Start the proxy cluster before `bundle run`:
+   `databricks clusters start <gitProxyClusterId>` → wait for `RUNNING` (~3–5 min). *Anyone can start
+   it; you don't need to own it.*
+3. `databricks bundle run customer360 --target prod`.
+
+**On a workspace where you're admin** (own FE Vending-Machine workspace) — self-service the proxy so you
+never depend on a shared cluster:
+- `databricks api patch /api/2.0/workspace-conf --json '{"enableGitProxy":"true"}'`
+- Create/own a small single-node cluster, then point the proxy at it:
+  `databricks api patch /api/2.0/workspace-conf --json '{"gitProxyClusterId":"<your-cluster-id>"}'`
+  ⚠️ **workspace-wide setting** — on a SHARED workspace, don't repoint it (affects everyone); just
+  *start* the existing shared cluster (step 2 above). Repoint only on a workspace you own.
+
+**Why this isn't a portability problem for the project:** the bundle itself is workspace-agnostic
+(repo/branch = variables, SP-bound git credential, no hardcoded ids). "Redeploy anywhere" = pick/prepare
+a workspace with a healthy git proxy + register the SP git credential, then
+`bundle deploy && bundle run --target prod`. The proxy is an environment prerequisite, not repo state.
+
+## 6c. Existing-app collision → `bundle deployment bind` (hit live 2026-07-30)
+
+First prod deploy failed `409 ALREADY_EXISTS` — the app `customer360` already existed (created by the
+**dev** target), but **prod has its own state** (different `root_path`) and tried to CREATE it. Fix =
+adopt the existing app into prod's state instead of renaming it (renaming → a 2nd app, new URL, new SP,
+credential re-registration — wrong):
+```
+databricks bundle deployment bind customer360 customer360 --target prod --auto-approve
+```
+(KEY = bundle resource key; RESOURCE_ID = the app's name — an app's id IS its name.)
+> Consequence: dev + prod now manage the **same** physical app. `deploy --target dev` flips it back to
+> `source_code_path`; `--target prod` flips it to git-source. Post-T8, treat **prod** as the submission
+> source of truth; use dev only for throwaway iteration.
+
 ## 7. Notes for reflection / process_doc
 
 - **Why the user's "Linked account" idea wasn't enough:** git-source apps pull as the **app SP**;
