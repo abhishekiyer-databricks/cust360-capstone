@@ -1,0 +1,65 @@
+WARNING:databricks.sdk:Databricks CLI v0.291.0 does not support --force-refresh (requires >= v0.296.0). The CLI's token cache may provide stale tokens.
+==============================================================================
+T9 Lakebase ops — user=abhishek.iyer@databricks.com
+prod parent=ai27-lb-apps-capstone host=ep-plain-art-e1jje7ek.database.eastus2.azuredatabricks.net
+demo instance=ai27-lb-t9-demo
+==============================================================================
+
+##############################################################################
+# T9a — BRANCHING + ISOLATION (against real prod, prod never mutated)
+##############################################################################
+[A1] parent customer_notes_staging count N = 7
+  creating branch 'ai27-lb-apps-capstone-branch' from 'ai27-lb-apps-capstone' …
+  'ai27-lb-apps-capstone-branch' state=DatabaseInstanceState.AVAILABLE host=ep-quiet-sun-e1xx8ro0.database.eastus2.azuredatabricks.net
+[A2] B1 (branch) count = 7  (== N ? True)
+[A3] destructive DELETE on B1 (branch only)
+      B1 count after DELETE = 0
+[A4] parent count still = 7  → ISOLATION OK
+  deleted 'ai27-lb-apps-capstone-branch'
+  creating standalone instance 'ai27-lb-t9-demo' …
+  'ai27-lb-t9-demo' state=DatabaseInstanceState.AVAILABLE host=ep-super-mode-e1aefb5v.database.eastus2.azuredatabricks.net
+
+##############################################################################
+# T9b — GENUINE PITR RECOVERY + QUERY INSIGHTS (throwaway instance)
+##############################################################################
+[P1] create table + insert rows on demo, capture T0, then DELETE
+      inserted N=500; T0=2026-07-30T04:29:58.116518+00:00
+      DELETE FROM customer_notes_staging (data really gone on this lineage)
+      demo count after DELETE = 0
+[P2] PITR child of demo @ T0
+  creating PITR child @ 2026-07-30T04:29:58Z 'ai27-lb-t9-demo-pitr' from 'ai27-lb-t9-demo' …
+  'ai27-lb-t9-demo-pitr' state=DatabaseInstanceState.AVAILABLE host=ep-floral-night-e141e7xk.database.eastus2.azuredatabricks.net
+      PITR child count = 500  → RECOVERY OK (== N=500)
+[Q1] seed synthetic audit rows on demo
+      total audit rows = 200000; target 'user42@acme.example' → 400 rows
+      pg_stat_statements enabled
+[Q2] BEFORE — no index on actor_email
+  before plan=Seq Scan     SERVER p50= 13.214 p95= 16.360 max= 20.718 ms  | client p95=  248.1 ms(+RTT)
+  before pg_stat_statements: calls=100 mean=13.720ms max=20.848ms
+[Q3] CREATE INDEX on customer_audit_log(actor_email)
+      index created + analyzed
+[Q4] AFTER — with index
+  after  plan=Bitmap Heap Scan SERVER p50=  0.712 p95=  0.891 max= 16.792 ms  | client p95=  300.3 ms(+RTT)
+  after  pg_stat_statements: calls=100 mean=1.079ms max=19.357ms
+  deleted 'ai27-lb-t9-demo-pitr'
+
+##############################################################################
+# TEARDOWN
+##############################################################################
+  deleted 'ai27-lb-t9-demo'
+  our leftover instances: none
+  prod 'ai27-lb-apps-capstone' intact: True
+
+==============================================================================
+T9 RESULTS
+==============================================================================
+T9a  branching + isolation (real prod):
+     branch B1 = 7 (==N=7); DELETE→0; parent stayed 7 → ISOLATION PROVEN
+T9b  PITR recovery (throwaway instance):
+     inserted N=500; DELETE→0; PITR@T0→500 → RECOVERED
+T9b  query insights (server-side p95, network-independent):
+     seeded 200000 rows; target matches 400
+     before plan=Seq Scan     p95=  16.360 ms (client p95 248 ms incl. RTT)
+     after  plan=Bitmap Heap Scan p95=   0.891 ms (client p95 300 ms incl. RTT)
+     speedup ≈ 18.4× (server-side p95)
+==============================================================================

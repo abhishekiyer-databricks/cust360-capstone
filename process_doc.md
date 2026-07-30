@@ -310,3 +310,57 @@ A **second, separate auth boundary** on top of the in-app APIs: partner systems 
   itself); the two-gate failure modes demonstrate the boundary explicitly.
 - **Deployed on dev; not yet promoted to prod.** Prod is git-source (serves committed code only), so T3a
   reaches the submission app after commit/push + `deploy`/`run --target prod` (Git Proxy cluster running).
+
+### ✅ T9 — Lakebase ops: branching, PITR, query insights
+Pure **database operations** (no app code) run from one reproducible, self-cleaning script
+(`lakebase/ops/t9_branch_pitr_queryperf.py`); captured output in `lakebase/ops/t9_run_output.txt`.
+Because we're **not submitting screenshots**, the *recorded numbers* below are the artifact.
+
+- **Model note (important).** Our instance `ai27-lb-apps-capstone` is the **flat *Database Instance***
+  model, not the newer *Postgres Projects* model the T9 doc links point at. So a **"branch" = a child
+  instance** created via `parent_instance_ref`, and **PITR = a child created at
+  `parent_instance_ref.branch_time`** (a past UTC timestamp / WAL LSN within the retention window; ours
+  is **7 days**). Same skills graded, slightly different verbs than the linked docs.
+- **Two platform constraints discovered live** (both shaped the design):
+  1. **Nested children are disabled** — you *cannot* create a child from a child. So a PITR restore must
+     root at a **top-level** instance, not off a branch.
+  2. **`force` delete is unsupported** — delete children *before* their parent; no force flag.
+- **How the two skills were split onto the right substrate:**
+  - **T9a — branching + isolation → against REAL PROD.** Branch prod → `…-branch` (copy-on-write, comes
+    up with the exact 7 rows), run the destructive `DELETE FROM customer_notes_staging` **on the branch**,
+    and show the **parent is untouched**. The branch is the blast radius; prod keeps serving.
+  - **T9b — genuine PITR recovery + query perf → on a DEDICATED THROWAWAY instance** (`ai27-lb-t9-demo`).
+    Deleting on prod is never acceptable, and PITR can't nest under a branch, so recovery of *actually
+    deleted* data is demonstrated on a top-level throwaway lineage: insert N=500 → capture T0 → `DELETE`
+    (rows really gone) → **PITR child @ T0 brings all 500 back**.
+- **Safety:** every destructive statement is guarded by `assert host != PARENT_HOST` so it can never run
+  against prod; connect as the **current user** with a **per-instance minted** DB credential
+  (`generate_database_credential(instance_names=[…])`); children created at **CU_1**; **teardown deletes
+  everything the script created** (verified: `list-database-instances` shows no T9 leftovers, prod intact).
+- **Verified results (from `t9_run_output.txt`):**
+
+  ```text
+  T9a  branching + isolation (real prod):
+       branch B1 = 7 (==N=7); DELETE→0; parent stayed 7 → ISOLATION PROVEN
+  T9b  PITR recovery (throwaway instance):
+       inserted N=500; DELETE→0; PITR@T0→500 → RECOVERED
+  T9b  query insights (server-side p95, network-independent):
+       seeded 200000 rows; target 'user42@acme.example' matches 400
+       before plan=Seq Scan          p95= 16.360 ms (client p95 248 ms incl. RTT)
+       after  plan=Bitmap Heap Scan   p95=  0.891 ms (client p95 300 ms incl. RTT)
+       speedup ≈ 18.4× (server-side p95)
+  ```
+
+- **Measurement gotcha (worth calling out).** A naïve client-side wall-clock p95 showed a *misleading*
+  1.3× "improvement" — because the ~300 ms **laptop→Azure round-trip** dominates and is identical
+  before/after, swamping the query gain. The honest metric is **server-side execution time** via
+  `EXPLAIN (ANALYZE, FORMAT JSON)` (`"Execution Time"`), which is network-independent: **16.4 ms → 0.89 ms
+  ≈ 18×**. This matches `pg_stat_statements` (`mean_exec_time` **13.7 ms → 1.08 ms**) — two independent
+  server-side sources agree. The `WHERE actor_email = …` point lookup goes **Seq Scan → index/bitmap scan**
+  once `CREATE INDEX … (actor_email)` exists.
+- **Reflection points:** branching is "git for the database" — instant copy-on-write clones let you nuke a
+  copy of prod to test a destructive change while prod serves; **PITR does not roll a parent back in place**
+  — it *produces a new instance* holding the historical state, so "restore" = "branch at a past timestamp,
+  then read/copy the recovered rows"; and the missing-index story is only visible **server-side** once the
+  table is large enough (a point query on prod's ~16 real audit rows would show nothing — hence seeding
+  200k rows on the throwaway).

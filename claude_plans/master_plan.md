@@ -186,7 +186,7 @@ the start.
 | 10 | **T6** `app.yaml` finalize (env + scopes + valueFrom) | Consolidate config once features exist. | Deploy; no missing-secret/401 errors |
 | 11 | **T8-full** Finalize DABs (resources/*.yml, git creds, commit dist) | Full git-source deploy w/ SP git credential. | UI shows git repo+branch+commit SHA |
 | 12 | **T3a** External M2M API + `examples/m2m_test.py` | Separate surface; after app SP exists. | `m2m_test.py` returns 200 + JSON |
-| 13 | **T9** Lakebase ops (branch+PITR, query insights) | Ops exercises against the live instance. | Screenshots captured |
+| 13 | **T9** Lakebase ops (branch+PITR, query insights) ✅ DONE | Ops exercises against the live instance. | Numbers captured: isolation proven, PITR 500/500, index ~18× (server p95) |
 | 14 | **Optimizations pass** pagination/caching/pooling/React perf/observability | Harden the app; document choices. | Perf "done when" targets met |
 | 15 | **Submission** reflection + 3-min recording + repo/app URLs | Package it up. | — |
 
@@ -275,7 +275,8 @@ nav; no N+1 Lakebase queries on detail.
 - [ ] Live app URL (git-source app via `bundle deploy` + `bundle run`)
 - [ ] 3-min recording: list → detail (all tabs) → add note → override → genie → dashboard → forward-ETL
 - [ ] `examples/m2m_test.py` stdout (200 + JSON) in writeup
-- [ ] T9 screenshots (branch+PITR, before/after p95 latency)
+- [x] T9 numbers (branch+PITR, before/after p95 latency) — captured in `lakebase/ops/t9_run_output.txt`
+      (no screenshots submitted; server-side p95 recorded instead)
 - [ ] Reflection paragraph: sync-mode choices + which optimizations done / next
 
 ---
