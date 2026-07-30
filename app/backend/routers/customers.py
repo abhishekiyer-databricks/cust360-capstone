@@ -18,7 +18,7 @@ import logging
 import time
 
 from cachetools import TTLCache
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -74,10 +74,16 @@ _PROFILE_COLS = (
 _SLOW_MS = 500  # log queries slower than this at WARNING (master_plan §7 observability)
 
 
-def _log_slow(label: str, started: float) -> None:
+def _log_slow(label: str, started: float, params: object = None) -> None:
     elapsed_ms = (time.monotonic() - started) * 1000
     if elapsed_ms > _SLOW_MS:
-        log.warning("slow query %s took %.0fms", label, elapsed_ms)
+        # Structured extras (O4): params + elapsed land as fields in the JSON log line.
+        log.warning(
+            "slow query %s took %.0fms",
+            label,
+            elapsed_ms,
+            extra={"query": label, "elapsed_ms": round(elapsed_ms), "params": params},
+        )
 
 
 @router.get("/customers", response_model=Page[Customer])
@@ -126,7 +132,7 @@ def list_customers(
                 [*params, page_size, offset],
             )
             rows = cur.fetchall()
-    _log_slow("list_customers", started)
+    _log_slow("list_customers", started, params={"where": where, "values": params})
 
     items = [Customer(**row) for row in rows]
     return Page(items=items, total=total, page=page, page_size=page_size)
@@ -153,7 +159,7 @@ def get_customer(customer_id: str) -> CustomerDetail:
                 [customer_id],
             )
             txn_rows = cur.fetchall()
-    _log_slow("get_customer", started)
+    _log_slow("get_customer", started, params={"customer_id": customer_id})
 
     return CustomerDetail(
         profile=CustomerProfile(**profile_row),
@@ -231,9 +237,15 @@ def get_customer_metrics(customer_id: str, request: Request) -> CustomerMetrics:
 _segments_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
 
 
+# Idempotent reference data → browser may cache 5m (Optimizations O2). `private` because the
+# app is behind per-user auth; matches the client-side staleTime + the server TTLCache.
+_REFERENCE_CACHE_CONTROL = "private, max-age=300, must-revalidate"
+
+
 @router.get("/segments", response_model=list[Segment])
-def list_segments(request: Request) -> list[Segment]:
+def list_segments(request: Request, response: Response) -> list[Segment]:
     """The 8 named segments (id + name), TTL-cached ~5m."""
+    response.headers["Cache-Control"] = _REFERENCE_CACHE_CONTROL
     cached = _segments_cache.get("all")
     if cached is not None:
         return cached

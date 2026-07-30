@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,13 +27,27 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config
 from .auth import caller_email, obo_client, sp_client
-from .db import lakebase_sp
+from .db import close_pool, lakebase_sp, open_pool
+from .logging_config import configure_logging, request_id_var
 from .routers import customers, external, genie, jobs
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+# Structured JSON logging (Optimizations O4). Replaces basicConfig; every line carries the
+# request_id via a contextvar set in RequestIdMiddleware.
+configure_logging(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Customer 360", version="0.3.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Open the Lakebase connection pool on startup, close it on shutdown (Optimizations O1)."""
+    open_pool()
+    try:
+        yield
+    finally:
+        close_pool()
+
+
+app = FastAPI(title="Customer 360", version="0.4.0", lifespan=lifespan)
 
 # Compress responses > 1KB (master_plan §7 API hygiene).
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -47,7 +62,12 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
         request.state.request_id = request_id
-        response = await call_next(request)
+        # Publish to the contextvar so every log line during this request is correlated (O4).
+        token = request_id_var.set(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_var.reset(token)
         response.headers["X-Request-Id"] = request_id
         return response
 
@@ -68,7 +88,7 @@ app.include_router(external.router)
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "customer360", "stage": "t3a-external"}
+    return {"status": "ok", "service": "customer360", "stage": "optimizations"}
 
 
 @app.get("/api/whoami")
@@ -100,8 +120,13 @@ def db_check():
     return {"lakebase": "ok", "select_1": row[0] if row else None}
 
 
+# Cache-Control for idempotent, non-user-specific reference GETs (Optimizations O2). `private`
+# (not public) because the app sits behind per-user auth; 5 min matches the client staleTime.
+_REFERENCE_CACHE_CONTROL = "private, max-age=300, must-revalidate"
+
+
 @app.get("/api/config")
-def get_config():
+def get_config(response: Response):
     """Non-secret ids the React app needs (host / warehouse / dashboard / Genie).
 
     `databricks_host` is the workspace URL the frontend builds the dashboard embed URL from
@@ -118,6 +143,7 @@ def get_config():
     host = config.DATABRICKS_HOST
     if host and not host.startswith(("http://", "https://")):
         host = f"https://{host}"
+    response.headers["Cache-Control"] = _REFERENCE_CACHE_CONTROL
     return {
         "databricks_host": host,
         "warehouse_id": config.WAREHOUSE_ID,

@@ -84,7 +84,13 @@ def run_query(
 
     elapsed_ms = (time.monotonic() - started) * 1000
     if elapsed_ms > _SLOW_MS:
-        log.warning("slow warehouse query %s took %.0fms", label, elapsed_ms)
+        # Structured extras (O4): params + elapsed become fields in the JSON log line.
+        log.warning(
+            "slow warehouse query %s took %.0fms",
+            label,
+            elapsed_ms,
+            extra={"query": label, "elapsed_ms": round(elapsed_ms), "params": params},
+        )
 
     # Map columns -> dicts. Empty result set → [].
     result = resp.result

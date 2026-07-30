@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge, Group, NumberInput, Paper, Select, Stack, Title } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { DataTable } from "mantine-datatable";
+import { DataTable, type DataTableColumn } from "mantine-datatable";
 import { useNavigate } from "react-router-dom";
 
 import { Customer, listCustomers, listSegments } from "../api/client";
@@ -51,6 +51,35 @@ export default function Customers() {
     staleTime: 10 * 1000, // list: 10s (master_plan §7)
     placeholderData: keepPreviousData, // keep last page visible while the next loads
   });
+
+  // Static column defs → memoize so the grid doesn't rebuild them every render (O6).
+  const columns = useMemo<DataTableColumn<Customer>[]>(
+    () => [
+      { accessor: "customer_id", title: "ID", width: 110 },
+      {
+        accessor: "name",
+        title: "Name",
+        render: (c) => `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—",
+      },
+      { accessor: "email", title: "Email" },
+      { accessor: "country", title: "Country", width: 110 },
+      { accessor: "segment_id", title: "Segment", width: 100 },
+      {
+        accessor: "lifetime_value",
+        title: "LTV",
+        width: 120,
+        textAlign: "right",
+        render: (c) => money(c.lifetime_value),
+      },
+      {
+        accessor: "churn_score",
+        title: "Churn",
+        width: 100,
+        render: (c) => churnBadge(c.churn_score),
+      },
+    ],
+    [],
+  );
 
   return (
     <Stack>
@@ -111,30 +140,7 @@ export default function Customers() {
         records={data?.items ?? []}
         idAccessor="customer_id"
         onRowClick={({ record }) => navigate(`/customers/${record.customer_id}`)}
-        columns={[
-          { accessor: "customer_id", title: "ID", width: 110 },
-          {
-            accessor: "name",
-            title: "Name",
-            render: (c) => `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—",
-          },
-          { accessor: "email", title: "Email" },
-          { accessor: "country", title: "Country", width: 110 },
-          { accessor: "segment_id", title: "Segment", width: 100 },
-          {
-            accessor: "lifetime_value",
-            title: "LTV",
-            width: 120,
-            textAlign: "right",
-            render: (c) => money(c.lifetime_value),
-          },
-          {
-            accessor: "churn_score",
-            title: "Churn",
-            width: 100,
-            render: (c) => churnBadge(c.churn_score),
-          },
-        ]}
+        columns={columns}
         totalRecords={data?.total ?? 0}
         recordsPerPage={PAGE_SIZE}
         page={page}

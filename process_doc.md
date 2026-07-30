@@ -364,3 +364,51 @@ Because we're **not submitting screenshots**, the *recorded numbers* below are t
   then read/copy the recovered rows"; and the missing-index story is only visible **server-side** once the
   table is large enough (a point query on prod's ~16 real audit rows would show nothing — hence seeding
   200k rows on the throwaway).
+
+### ✅ Optimizations pass — hardening (master_plan §7)
+
+Most of §7 was **baked in as we built** (pagination + hard cap, GZip, minimal payloads / Pydantic
+response models, TanStack per-key staleTimes + `invalidateQueries` after writes, `React.lazy`/Suspense
+code-split, 250 ms filter debounce, server-side `TTLCache` on `/segments`, `X-Request-Id`, one-transaction
+writes + idempotent UPSERT, bounded warehouse `wait_timeout`). This pass closed the **deliberately deferred**
+items and produced the measured numbers.
+
+- **O1 — Connection pooling (the big one).** `db.py` moved from *one short-lived connection per request* to a
+  module-level `psycopg_pool.ConnectionPool` (min 2 / max 10), opened/closed on the FastAPI **lifespan**.
+  Token freshness is preserved *without* paying a mint per request: a `_FreshTokenConnection` subclass injects
+  a just-minted Lakebase credential **per physical connect**, and `max_lifetime=1800 s` recycles (re-auths)
+  each socket well inside the ~1 h token TTL. `lakebase_sp()` keeps the identical context-manager API → **zero
+  router changes**. Verified live: 2 connections pre-opened and reused across requests, **no per-request
+  credential mint** (pool stats `connections_num=2` over 2 requests).
+- **O3 — Outbound safety.** `connect_timeout=10 s` on the dial; `statement_timeout=15 s` set per connection
+  (verified `SHOW statement_timeout → 15s`) so a runaway Lakebase query can't pin a worker.
+- **O2 — Browser caching.** `Cache-Control: private, max-age=300, must-revalidate` on the two idempotent
+  reference GETs (`/api/config`, `/api/segments`) only — `private` because the app is behind per-user auth;
+  write endpoints stay uncached.
+- **O4 — Structured logging.** New `logging_config.JsonFormatter` (stdlib only, no new dep) emits one JSON
+  line per record; a `request_id` **contextvar** set in the middleware correlates every line React → FastAPI
+  → Lakebase. Slow-query WARNINGs now carry `{query, elapsed_ms, params}` as JSON fields.
+- **O6 — React perf.** DataTable `columns` on the list + detail grids are `useMemo`-ized so they aren't
+  rebuilt each render. `tsc --noEmit` + `npm run build` clean.
+- **O5 — Composite index on `customers_synced` — a deliberately-tested hypothesis that came back NEGATIVE
+  (and that's the interesting result).** `lakebase/reverse_etl/04_indexes.py` created
+  `(segment_id, lifetime_value DESC)` and measured server-side `EXPLAIN (ANALYZE, FORMAT JSON)` before/after
+  (the T9 methodology — GOTCHA #17). Verdict (`lakebase/optim/o5_index_output.txt`):
+
+  ```text
+  index_supported: true    (synced tables DO accept a secondary b-tree index)
+  before 3.936 ms → after 4.490 ms   plan_after: Seq Scan   (index inert — planner ignores it)
+  ```
+
+  **Why inert:** (a) the list filter is `segment_id ILIKE '%S1%'` (case-insensitive *contains*) — a
+  leading-wildcard `ILIKE` **can't use a b-tree index**, it always scans; (b) at 10 k rows with S1 ~12 %
+  selective, a Seq Scan + sort beats an index scan anyway. This is the **mirror image of T9** (same "add an
+  index" move gave **18×** there on 200 k rows + an exact point-lookup, and **~0×** here) — the lesson is that
+  an index pays off only when the table is large *and* the predicate is index-usable *and* selective. The
+  <200 ms list target is already met with a Seq Scan (~4 ms server-side), so the index was **dropped** (on a
+  CONTINUOUS synced table it would add write cost on every sync for no read benefit).
+
+- **Reflection points:** the pool is where correctness (fresh token) and performance (no per-request TLS +
+  credential round-trip) had to be *reconciled*, not traded — solved by rotating the token on physical
+  connect + `max_lifetime`; and O5 is the honest "we measured and it didn't help, so we removed it" story —
+  optimization guided by server-side measurement, not by adding indexes on reflex.

@@ -278,6 +278,8 @@ nav; no N+1 Lakebase queries on detail.
 - [x] T9 numbers (branch+PITR, before/after p95 latency) — captured in `lakebase/ops/t9_run_output.txt`
       (no screenshots submitted; server-side p95 recorded instead)
 - [ ] Reflection paragraph: sync-mode choices + which optimizations done / next
+      (optimization writeup captured in process_doc.md "Optimizations pass" section;
+      O5 index measured NEGATIVE + dropped — see lakebase/optim/o5_index_output.txt)
 
 ---
 

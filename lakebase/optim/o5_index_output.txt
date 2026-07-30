@@ -1,0 +1,43 @@
+O5 — composite index feasibility on customers_synced (run 2026-07-30)
+Script: lakebase/reverse_etl/04_indexes.py  (run as a workspace job, connected as current user)
+
+Notebook exit verdict:
+{
+  "table": "customers_synced",
+  "index": "idx_customers_seg_ltv",
+  "index_supported": true,
+  "create_error": null,
+  "before_execution_ms": 3.936,
+  "after_execution_ms": 4.49,
+  "plan_after": "Seq Scan",
+  "note": "Synced tables are pipeline-managed; if a resync drops this index, re-run this
+           notebook or move the optimization to the gold Delta side. 10k rows is small enough
+           that the missing-index penalty is modest — see before/after numbers."
+}
+
+INTERPRETATION
+--------------
+1. FEASIBILITY (the real unknown): ANSWERED = YES. A pipeline-managed synced table DOES
+   accept a secondary b-tree index (CREATE INDEX succeeded, create_error=null). Durability
+   across a full resync is still pipeline-dependent — re-run this notebook if a resync drops it.
+
+2. BENEFIT: NONE for this query. Server-side Execution Time is unchanged (3.94 ms -> 4.49 ms,
+   within noise) and the planner still chooses Seq Scan even after ANALYZE. The index is inert
+   because:
+     a. The list endpoint filters `segment_id ILIKE %s` with the param wrapped as `%S1%`
+        (case-insensitive CONTAINS). A leading-wildcard ILIKE cannot use a b-tree index — it
+        always scans. So this query could never use the index as written.
+     b. Even with exact `=`, at 10k rows with S1 ~12% selective, a Seq Scan + sort beats an
+        index scan; Postgres correctly ignores the index at this table size.
+
+3. CONTRAST WITH T9: the same "add an index" move gave 18x there (200k rows + exact point
+   lookup on actor_email) and ~0x here (10k rows + leading-wildcard ILIKE). The lesson:
+   an index helps only when the table is large AND the predicate is index-usable AND selective.
+
+CONCLUSION
+----------
+The <200 ms list-endpoint target is already met with a Seq Scan (~4 ms server-side), so the
+index is not needed. Recommendation: DROP the inert index — on a CONTINUOUS synced table it
+adds write/maintenance cost on every sync update for zero read benefit. If exact-match segment
+filtering is later adopted (the dropdown already emits exact ids) AND the table grows large,
+revisit with `segment_id = %s` + this index.

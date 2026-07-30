@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Anchor,
   Badge,
@@ -17,7 +17,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DataTable } from "mantine-datatable";
+import { DataTable, type DataTableColumn } from "mantine-datatable";
 import { Link, useParams } from "react-router-dom";
 
 import {
@@ -141,6 +141,36 @@ function MetricsTab({ id }: { id: string }) {
 }
 
 function ActivityTab({ txns }: { txns: Transaction[] }) {
+  // Static column defs → memoize so the grid doesn't rebuild them every render (O6).
+  const columns = useMemo<DataTableColumn<Transaction>[]>(
+    () => [
+      { accessor: "transaction_date", title: "Date", width: 130 },
+      { accessor: "transaction_id", title: "Transaction" },
+      { accessor: "product_id", title: "Product", width: 120 },
+      { accessor: "channel", title: "Channel", width: 110 },
+      {
+        accessor: "status",
+        title: "Status",
+        width: 120,
+        render: (t) => (
+          <Badge
+            variant="light"
+            color={t.status === "completed" ? "teal" : t.status === "cancelled" ? "red" : "gray"}
+          >
+            {t.status ?? "—"}
+          </Badge>
+        ),
+      },
+      {
+        accessor: "amount",
+        title: "Amount",
+        width: 110,
+        textAlign: "right",
+        render: (t) => (t.amount == null ? "—" : `$${t.amount.toFixed(2)}`),
+      },
+    ],
+    [],
+  );
   return (
     <DataTable<Transaction>
       withTableBorder
@@ -150,32 +180,7 @@ function ActivityTab({ txns }: { txns: Transaction[] }) {
       records={txns}
       idAccessor="transaction_id"
       noRecordsText="No recent transactions"
-      columns={[
-        { accessor: "transaction_date", title: "Date", width: 130 },
-        { accessor: "transaction_id", title: "Transaction" },
-        { accessor: "product_id", title: "Product", width: 120 },
-        { accessor: "channel", title: "Channel", width: 110 },
-        {
-          accessor: "status",
-          title: "Status",
-          width: 120,
-          render: (t) => (
-            <Badge
-              variant="light"
-              color={t.status === "completed" ? "teal" : t.status === "cancelled" ? "red" : "gray"}
-            >
-              {t.status ?? "—"}
-            </Badge>
-          ),
-        },
-        {
-          accessor: "amount",
-          title: "Amount",
-          width: 110,
-          textAlign: "right",
-          render: (t) => (t.amount == null ? "—" : `$${t.amount.toFixed(2)}`),
-        },
-      ]}
+      columns={columns}
     />
   );
 }
