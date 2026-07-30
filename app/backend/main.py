@@ -27,7 +27,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
 from .auth import caller_email, obo_client, sp_client
 from .db import lakebase_sp
-from .routers import customers, genie, jobs
+from .routers import customers, external, genie, jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ app.add_middleware(RequestIdMiddleware)
 app.include_router(customers.router)
 app.include_router(jobs.router)
 app.include_router(genie.router)
+app.include_router(external.router)
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ app.include_router(genie.router)
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "customer360", "stage": "t5-genie"}
+    return {"status": "ok", "service": "customer360", "stage": "t3a-external"}
 
 
 @app.get("/api/whoami")

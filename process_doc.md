@@ -243,3 +243,70 @@ path `app`) on each `bundle run`, **as the app service principal**.
   `main` + path `app`), **not** a folder upload; `resolved_commit b3e2bd28…` **matches local `main` HEAD**;
   UI Source page shows the git repository + branch. Submission deploy path is now
   `bundle deploy/run --target prod`.
+
+### ✅ T3a — External API: partner access via M2M
+A **second, separate auth boundary** on top of the in-app APIs: partner systems pull customer data
+**without the app UI**, authenticating as a **service principal** via **machine-to-machine (M2M)** OAuth.
+- **The realization that makes this small:** the Apps proxy treats a *machine* caller exactly like a
+  *human* caller — both authenticate to the proxy, which strips `Authorization` and forwards
+  `X-Forwarded-Access-Token`. So the handler is nearly identical to the in-app metrics path; the
+  difference is entirely in **who mints the token and what grants they hold**, not in request handling.
+- **Endpoint:** `GET /api/external/customers/{id}` (`app/backend/routers/external.py`, prefix
+  `/api/external` so it's visibly separate). Returns the **same `CustomerDetail` shape** as the in-app
+  detail endpoint, but reads **Delta gold via the SQL warehouse** using the caller's bearer (OBO) — it
+  **never touches Lakebase and never falls back to the app SP**. Reuses `obo_client()` (401s with no
+  token, no SP fallback) + `warehouse.run_query()` (parameterized, PermissionDenied→403, failure→502).
+- **Dedicated least-privilege partner SP** (`cust360-partner`, not the app's own SP — the *realistic*
+  test). Created via `service-principals create`; OAuth secret via `service-principal-secrets-proxy
+  create`. Holds **only** what the endpoint needs: `CAN_USE` on the app (the Apps-proxy gate), `CAN_USE`
+  on the warehouse, and `USE CATALOG`/`USE SCHEMA` + `SELECT` on `gold.customers`/`gold.transactions`
+  (nothing else — no notes/overrides/audit, no Lakebase). client_id `ec2a70c0-…`, numeric id
+  `146608447413191`.
+- **Two independent permission gates** (worth showing in the writeup): a valid OAuth bearer is necessary
+  but not sufficient. Missing **CAN_USE on the app** → the *proxy* returns **401** before your code runs;
+  missing **warehouse/UC SELECT** → your code runs but the *warehouse* returns **INSUFFICIENT_PERMISSIONS**
+  (wrapped as 403). A fresh SP with zero starting access makes each gate individually observable.
+- **M2M flow:** the SP does **not** send its `client_secret` as the Bearer. The SDK runs the OAuth
+  `client_credentials` grant against `/oidc/v1/token` and returns a short-lived `access_token` — *that's*
+  the Bearer. Helper `examples/_token.py::m2m_bearer()` wraps this (`oauth_service_principal(cfg)` returns
+  an `{"Authorization": "Bearer …"}` header; we strip the scheme). Tests: `examples/m2m_test.py` (happy
+  path) + `examples/README.md`. `requests` is a dev/test dep only — intentionally **not** in
+  `app/requirements.txt`.
+- **Gotcha — `deploy` alone doesn't restart the app.** After `bundle deploy --target dev` uploaded the
+  new code, the first test returned **`200` with the SPA `index.html`**, not JSON — the *running* app was
+  still the old T8 git-source build (no external router), so `/api/external/…` missed all routes and the
+  catch-all served the frontend. Fix = `bundle run customer360 --target dev` to start a **new deployment**
+  from the uploaded source. (Deploy = upload + config; run = new serving deployment.)
+- **CLI version matters.** The first `deploy` failed with `Invalid update mask … resources[3].job.id`
+  under CLI **v0.291.0** (`~/.local/bin/databricks`, first on PATH). Re-running with **v1.5.0**
+  (`/opt/homebrew/bin/databricks`) succeeded — now used for all bundle commands to match the workspace CLI.
+- **Verified end-to-end (both done-when met):**
+  - **#1 — `m2m_test.py` → `200` + customer JSON** (partner SP bearer, minted via client_credentials):
+
+    ```text
+    Minting M2M bearer for client_id ec2a70c0-4ef1-443a-b2ca-1937cc8fa205 ...
+      got OAuth access_token (client_credentials grant).
+    GET .../api/external/customers/C0000000
+    -> 200
+    {
+      "profile": {
+        "customer_id": "C0000000", "first_name": "James", "last_name": "Chen",
+        "email": "james.chen0@example.com", "country": "US", "city": "New York",
+        "segment_id": "S8", "lifetime_value": 66750.76, "churn_score": 0.687, ...
+      },
+      "recent_transactions": [ { "transaction_id": "TS0000000", "transaction_date": "2026-07-13",
+        "channel": "web", "status": "completed", "amount": 1376.04 }, ... 11 completed txns ... ]
+    }
+    OK: 200 + customer JSON
+    ```
+
+    (Run with `DATABRICKS_CLIENT_SECRET=<redacted>` — the partner SP's OAuth secret is never committed.)
+  - **#2 — audit attribution.** `system.query.history` shows **both** SELECTs (customers + transactions)
+    attributed to `executed_by ec2a70c0-…` / `executed_by_user_id 146608447413191` = **`cust360-partner`**,
+    *not* the deploying user and *not* the app SP. Surfaced after ~2 min ingestion lag. This is the clean
+    proof of the boundary: a distinct partner identity ran the read, exactly as OBO (no-SP-fallback) intends.
+- **Reflection points:** M2M vs. human OBO is the **same proxy path + same handler code** (uniform Apps
+  auth model); a dedicated least-privilege partner SP is production-shaped (not the app impersonating
+  itself); the two-gate failure modes demonstrate the boundary explicitly.
+- **Deployed on dev; not yet promoted to prod.** Prod is git-source (serves committed code only), so T3a
+  reaches the submission app after commit/push + `deploy`/`run --target prod` (Git Proxy cluster running).
